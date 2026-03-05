@@ -6,7 +6,7 @@ import "device/esp"
 
 func initHardware() error {
 	// See:
-	// https://github.com/esp-rs/esp-wifi/blob/v0.2.0/esp-wifi/src/common_adapter/common_adapter_esp32c3.rs#L18
+	// https://github.com/esp-rs/esp-wifi/blob/main/esp-wifi/src/common_adapter/common_adapter_esp32c3.rs#L18
 
 	const (
 		SYSTEM_WIFIBB_RST       = 1 << 0

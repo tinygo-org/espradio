@@ -2,15 +2,23 @@
 
 #include "include.h"
 #include <stdarg.h>
-
-// Documentation for these functions:
-// https://github.com/esp-rs/esp-wifi/blob/main/esp-wifi/src/wifi/os_adapter.rs
+#include <stdio.h>
+#include <string.h>
 
 __attribute__((noreturn))
 void espradio_panic(char *s);
 
+/**************************************************************************
+ * Name: wifi_env_is_chip
+ *
+ * Description:
+ *   Config chip environment.
+ *
+ * Returned Value:
+ *   True if on chip or false if on FPGA.
+ *************************************************************************/
 static bool espradio_env_is_chip(void) {
-    espradio_panic("todo: _env_is_chip");
+    return true;
 }
 
 static void espradio_set_intr(int32_t cpu_no, uint32_t intr_source, uint32_t intr_num, int32_t intr_prio) {
@@ -59,15 +67,13 @@ int32_t espradio_semphr_give(void *semphr);
 
 void *espradio_wifi_thread_semphr_get(void);
 
-static void *espradio_mutex_create(void) {
-    espradio_panic("todo: _mutex_create");
-}
-
 void *espradio_recursive_mutex_create(void);
 
-static void espradio_mutex_delete(void *mutex) {
-    espradio_panic("todo: _mutex_delete");
+static void *espradio_mutex_create(void) {
+    return espradio_recursive_mutex_create();
 }
+
+void espradio_mutex_delete(void *mutex);
 
 int32_t espradio_mutex_lock(void *mutex);
 
@@ -144,20 +150,80 @@ static int32_t espradio_task_get_max_priority(void) {
     return 255; // arbitrary number
 }
 
+static unsigned espradio_alloc_count;
+static unsigned espradio_free_count;
+
 static void *espradio_malloc(size_t size) {
-    espradio_panic("todo: _malloc");
+    espradio_alloc_count++;
+    return malloc(size);
 }
 
 static void espradio_free(void *p) {
+    if (p) espradio_free_count++;
     free(p);
 }
 
-static int32_t espradio_event_post(const char* event_base, int32_t event_id, void* event_data, size_t event_data_size, uint32_t ticks_to_wait) {
-    espradio_panic("todo: _event_post");
+/* Event dispatch: minimal _event_post that just calls the callback.
+ * Unlike esp-rs we do not use esp_event to avoid extra dependencies. */
+typedef void (*espradio_event_cb_t)(void *arg, const char *base, int32_t id, void *data);
+static espradio_event_cb_t s_event_cb;
+static void *s_event_cb_arg;
+static int32_t s_last_event_id;
+
+static void espradio_dummy_event_cb(void *arg, const char *base, int32_t id, void *data) {
+    (void)arg;
+    (void)base;
+    (void)id;
+    (void)data;
 }
 
+void espradio_event_register_default_cb(void) {
+    s_event_cb = espradio_dummy_event_cb;
+    s_event_cb_arg = NULL;
+}
+
+/**************************************************************************
+ * Name: esp_event_post
+ *
+ * Description:
+ *   Active work queue and let the work to process the cached event.
+ *   (As in esp-rs: dispatch inside _event_post, then return; no handler
+ *   call after return.)
+ *
+ * Input Parameters:
+ *   event_base      - Event set name
+ *   event_id        - Event ID
+ *   event_data      - Event private data
+ *   event_data_size - Event data size
+ *   ticks_to_wait   - Waiting system ticks
+ *
+ * Returned Value:
+ *   0 if success or -1 if fail
+ *************************************************************************/
+static int32_t espradio_event_post(const char* event_base, int32_t event_id, void* event_data, size_t event_data_size, uint32_t ticks_to_wait) {
+    printf("osi: event_post base=%s id=%ld\n", event_base ? event_base : "(null)", (long)event_id);
+    (void)event_data_size;
+    (void)ticks_to_wait;
+
+    s_last_event_id = event_id;
+    if (s_event_cb) {
+        s_event_cb(s_event_cb_arg, event_base, event_id, event_data);
+    }
+
+    return 0;
+}
+
+/**************************************************************************
+ * Name: esp_get_free_heap_size
+ *
+ * Description:
+ *   Get free heap size by byte.
+ *
+ * Returned Value:
+ *   Free heap size.
+ *************************************************************************/
 static uint32_t espradio_get_free_heap_size(void) {
-    espradio_panic("todo: _get_free_heap_size");
+    return 256 * 1024;
 }
 
 static uint32_t espradio_rand(void) {
@@ -172,8 +238,8 @@ static void espradio_dport_access_stall_other_cpu_end_wrap(void) {
     espradio_panic("todo: _dport_access_stall_other_cpu_end_wrap");
 }
 
+/* Stub: request 80 MHz APB clock for WiFi — no-op (clocks are already enabled in init). */
 static void espradio_wifi_apb80m_request(void) {
-    espradio_panic("todo: _wifi_apb80m_request");
 }
 
 static void espradio_wifi_apb80m_release(void) {
@@ -184,44 +250,130 @@ static void espradio_phy_disable(void) {
     espradio_panic("todo: _phy_disable");
 }
 
+/* Stub: enable RF PHY — no-op (initialization already happens in init). */
 static void espradio_phy_enable(void) {
-    espradio_panic("todo: _phy_enable");
 }
 
 static int espradio_phy_update_country_info(const char* country) {
     espradio_panic("todo: _phy_update_country_info");
 }
 
+/* Stub: returns a zero MAC; production should read from eFuse. */
 static int espradio_read_mac(uint8_t* mac, unsigned int type) {
-    espradio_panic("todo: _read_mac");
+    (void)type;
+    if (mac) {
+        for (int i = 0; i < 6; i++)
+            mac[i] = 0;
+    }
+    return 0;
 }
 
-static void espradio_timer_arm(void *timer, uint32_t tmout, bool repeat) {
-    espradio_panic("todo: _timer_arm");
+#define TIMER_SLOTS 4
+static struct {
+    void *ptimer;
+    void (*fn)(void *);
+    void *arg;
+} timer_slots[TIMER_SLOTS];
+static unsigned timer_slots_used;
+
+void espradio_timer_fire(void *ptimer);
+
+static int timer_slot_find(void *ptimer) {
+    for (unsigned i = 0; i < timer_slots_used; i++)
+        if (timer_slots[i].ptimer == ptimer)
+            return (int)i;
+    return -1;
 }
 
-static void espradio_timer_disarm(void *timer) {
-    espradio_panic("todo: _timer_disarm");
+static int timer_slot_alloc(void *ptimer) {
+    int i = timer_slot_find(ptimer);
+    if (i >= 0) return i;
+    if (timer_slots_used >= TIMER_SLOTS) return -1;
+    i = (int)timer_slots_used++;
+    timer_slots[i].ptimer = ptimer;
+    return i;
 }
 
-static void espradio_timer_done(void *ptimer) {
-    espradio_panic("todo: _timer_done");
-}
-
+/**************************************************************************
+ * Name: timer_setfn
+ *
+ * Description:
+ *   Set timer callback and arg; store in ets_timer (blob) and in slots.
+ *
+ * Input Parameters:
+ *   ptimer    - Timer handle
+ *   pfunction - Callback
+ *   parg      - Callback argument
+ *************************************************************************/
 static void espradio_timer_setfn(void *ptimer, void *pfunction, void *parg) {
-    espradio_panic("todo: _timer_setfn");
+    printf("osi: timer_setfn ptimer=%p fn=%p arg=%p\n", (void *)ptimer, (void *)pfunction, (void *)parg);
+    if (ptimer) {
+        struct ets_timer *t = (struct ets_timer *)ptimer;
+        t->func = (void (*)(void *))pfunction;
+        t->priv = parg;
+        *(void (**)(void *))(ptimer) = (void (*)(void *))pfunction;
+        *(void **)((char *)ptimer + 4) = parg;
+    }
+    int i = timer_slot_alloc(ptimer);
+    if (i >= 0) {
+        timer_slots[i].fn = (void (*)(void *))pfunction;
+        timer_slots[i].arg = parg;
+    }
 }
+
+/* Stub: timers are not tracked, disarm is a no-op. */
+static void espradio_timer_disarm(void *timer) {
+    (void)timer;
+}
+
+/* Called after the callback finishes; no-op. */
+static void espradio_timer_done(void *ptimer) {
+    printf("osi: timer_done ptimer=%p\n", (void *)ptimer);
+    (void)ptimer;
+}
+
+extern void espradio_timer_arm_go(void *timer, uint32_t tmout_ticks, int repeat);
+
+/**************************************************************************
+ * Name: timer_arm
+ *
+ * Description:
+ *   Start timer (one-shot or repeat).
+ *
+ * Input Parameters:
+ *   timer - Timer handle
+ *   tmout - Timeout in ticks
+ *   repeat - true if periodic
+ *************************************************************************/
+static void espradio_timer_arm(void *timer, uint32_t tmout, bool repeat) {
+    printf("osi: timer_arm timer=%p tmout=%lu repeat=%d\n", (void *)timer, (unsigned long)tmout, (int)repeat);
+    espradio_timer_arm_go(timer, tmout, repeat ? 1 : 0);
+}
+
+void espradio_timer_fire(void *ptimer) {
+    printf("osi: timer_fire ptimer=%p\n", (void *)ptimer);
+    int i = timer_slot_find(ptimer);
+    if (i >= 0 && timer_slots[i].fn) {
+        void (*fn)(void *) = timer_slots[i].fn;
+        fn(timer_slots[i].arg);
+    } else {
+        printf("osi: timer_fire no slot or fn nil\n");
+    }
+}
+
+extern void espradio_timer_arm_go_us(void *timer, uint32_t us, int repeat);
 
 static void espradio_timer_arm_us(void *ptimer, uint32_t us, bool repeat) {
-    espradio_panic("todo: _timer_arm_us");
+    printf("osi: timer_arm_us ptimer=%p us=%lu\n", (void *)ptimer, (unsigned long)us);
+    espradio_timer_arm_go_us(ptimer, us, repeat ? 1 : 0);
 }
 
+/* Stub: reset WiFi MAC — no-op (we use a static/zero MAC). */
 static void espradio_wifi_reset_mac(void) {
-    espradio_panic("todo: _wifi_reset_mac");
 }
 
+/* Stub: enable WiFi clock signal — no-op (clocks are already enabled in init). */
 static void espradio_wifi_clock_enable(void) {
-    espradio_panic("todo: _wifi_clock_enable");
 }
 
 static void espradio_wifi_clock_disable(void) {
@@ -304,9 +456,21 @@ static uint32_t espradio_slowclk_cal_get(void) {
     espradio_panic("todo: _slowclk_cal_get");
 }
 
+#define LOG_MSG_MAX 384
+
 static void espradio_log_writev(unsigned int level, const char* tag, const char* format, va_list args) {
-    // Note: 'level' and 'tag' may be used to filter log messages.
-    vprintf(format, args);
+    static char buf[LOG_MSG_MAX];
+    int n = vsnprintf(buf, sizeof(buf), format, args);
+    if (n > 0) {
+        if ((size_t)n >= sizeof(buf)) {
+            buf[sizeof(buf)-1] = '\0';
+        }
+        if (tag && tag[0]) {
+            printf("[wifi][%u][%s] %s\n", level, tag, buf);
+        } else {
+            printf("[wifi][%u] %s\n", level, buf);
+        }
+    }
 }
 
 static void espradio_log_write(unsigned int level, const char* tag, const char* format, ...) {
@@ -319,6 +483,7 @@ static void espradio_log_write(unsigned int level, const char* tag, const char* 
 uint32_t espradio_log_timestamp(void);
 
 static void * espradio_malloc_internal(size_t size) {
+    espradio_alloc_count++;
     return malloc(size);
 }
 
@@ -327,27 +492,57 @@ static void * espradio_realloc_internal(void *ptr, size_t size) {
 }
 
 static void * espradio_calloc_internal(size_t n, size_t size) {
+    espradio_alloc_count++;
     return calloc(n, size);
 }
 
 static void * espradio_zalloc_internal(size_t size) {
-    espradio_panic("todo: _zalloc_internal");
+    espradio_alloc_count++;
+    return calloc(1, size);
 }
 
 static void * espradio_wifi_malloc(size_t size) {
-    espradio_panic("todo: _wifi_malloc");
+    espradio_alloc_count++;
+    return malloc(size);
 }
 
 static void * espradio_wifi_realloc(void *ptr, size_t size) {
-    espradio_panic("todo: _wifi_realloc");
+    if (ptr == NULL) {
+        espradio_alloc_count++;
+        return malloc(size);
+    }
+    espradio_alloc_count++;
+    void *n = malloc(size);
+    if (n == NULL) return NULL;
+    memcpy(n, ptr, size);
+    espradio_free_count++;
+    free(ptr);
+    return n;
 }
 
 static void * espradio_wifi_calloc(size_t n, size_t size) {
-    espradio_panic("todo: _wifi_calloc");
+    espradio_alloc_count++;
+    return calloc(n, size);
 }
 
 static void * espradio_wifi_zalloc(size_t size) {
+    espradio_alloc_count++;
     return calloc(1, size);
+}
+
+void espradio_alloc_stats(unsigned *out_alloc, unsigned *out_free) {
+    if (out_alloc) *out_alloc = espradio_alloc_count;
+    if (out_free) *out_free = espradio_free_count;
+}
+
+/* FreeRTOS heap: blob may call these for task/queue; route to same heap and count */
+void *pvPortMalloc(size_t size) {
+    espradio_alloc_count++;
+    return malloc(size);
+}
+void vPortFree(void *p) {
+    if (p) espradio_free_count++;
+    free(p);
 }
 
 void * espradio_wifi_create_queue(int queue_len, int item_size);
@@ -362,8 +557,9 @@ static void espradio_coex_deinit(void) {
     espradio_panic("todo: _coex_deinit");
 }
 
+/* Stub: WiFi/BT coexistence is not used, always "success". */
 static int espradio_coex_enable(void) {
-    espradio_panic("todo: _coex_enable");
+    return 0;
 }
 
 static void espradio_coex_disable(void) {
@@ -378,12 +574,18 @@ static void espradio_coex_condition_set(uint32_t type, bool dissatisfy) {
     espradio_panic("todo: _coex_condition_set");
 }
 
+/* Stub: WiFi/BT coexistence is not used, request is "accepted". */
 static int espradio_coex_wifi_request(uint32_t event, uint32_t latency, uint32_t duration) {
-    espradio_panic("todo: _coex_wifi_request");
+    (void)event;
+    (void)latency;
+    (void)duration;
+    return 0;
 }
 
+/* Stub: WiFi/BT coexistence is not used, release is a no-op. */
 static int espradio_coex_wifi_release(uint32_t event) {
-    espradio_panic("todo: _coex_wifi_release");
+    (void)event;
+    return 0;
 }
 
 static int espradio_coex_wifi_channel_set(uint8_t primary, uint8_t secondary) {
@@ -426,12 +628,17 @@ static int espradio_coex_schm_process_restart(void) {
     espradio_panic("todo: _coex_schm_process_restart");
 }
 
+/* Stub: WiFi/BT coexistence schedule callback is not used. */
 static int espradio_coex_schm_register_cb(int type, int (* cb)(int)) {
-    espradio_panic("todo: _coex_schm_register_cb");
+    (void)type;
+    (void)cb;
+    return 0;
 }
 
+/* Stub: WiFi/BT coexistence is not used, callback is not stored. */
 static int espradio_coex_register_start_cb(int (* cb)(void)) {
-    espradio_panic("todo: _coex_register_start_cb");
+    (void)cb;
+    return 0;
 }
 
 

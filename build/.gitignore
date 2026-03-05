@@ -1,0 +1,4 @@
+esp-idf/
+idf-wifi-project/build/
+*.log
+

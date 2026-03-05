@@ -4,42 +4,56 @@
 #include "include.h"
 #include <stdarg.h>
 
-// defined in osi.c
+/*
+ * Typical IDF flow (esp_wifi_init in wifi_init.c):
+ *   1. esp_wifi_set_log_level()           — in Go before init
+ *   2. esp_wifi_power_domain_on()         — adapter, optional
+ *   3. esp_wifi_init_internal(config)     — see below
+ *   4. esp_phy_modem_init()               — not present in blobs
+ *   5. esp_supplicant_init()              — not called (linking WPA sources pulls many deps)
+ *   6. s_wifi_inited / wifi_init_completed()
+ *
+ * esp_wifi_init_internal (implemented in libnet80211.a, no sources):
+ *   According to esp_private/wifi.h: allocates resources for the driver — control structure,
+ *   RX/TX buffers, WiFi NVS, etc. Must be called before any other WiFi API. Internally (from logs)
+ *   it creates a queue, semaphores, and starts the wifi driver task (worker) that processes
+ *   cmd 6 (set_log?), cmd 15 (init step). Return: ESP_OK (0) or an error code; the blob sometimes
+ *   returns a DRAM address (0x3FC8xxxx) — in Go we treat that as success (isPointerLike).
+ */
+extern void wifi_init_completed(void);  /* libnet80211.a */
+
 extern wifi_osi_funcs_t espradio_osi_funcs;
 
-wifi_init_config_t wifi_config = {
-    .osi_funcs = &espradio_osi_funcs,
-    .wpa_crypto_funcs = {
-        .size = sizeof(wpa_crypto_funcs_t),
-        .version = ESP_WIFI_CRYPTO_VERSION,
-        // TODO: fill in these functions
-    },
-    .static_rx_buf_num = CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM,
-    .dynamic_rx_buf_num = CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM,
-    .tx_buf_type = CONFIG_ESP_WIFI_TX_BUFFER_TYPE,
-    .static_tx_buf_num = WIFI_STATIC_TX_BUFFER_NUM,
-    .dynamic_tx_buf_num = WIFI_DYNAMIC_TX_BUFFER_NUM,
-    .rx_mgmt_buf_type = CONFIG_ESP_WIFI_DYNAMIC_RX_MGMT_BUF,
-    .rx_mgmt_buf_num = WIFI_RX_MGMT_BUF_NUM_DEF,
-    .cache_tx_buf_num = WIFI_CACHE_TX_BUFFER_NUM,
-    .csi_enable = WIFI_CSI_ENABLED,
-    .ampdu_rx_enable = WIFI_AMPDU_RX_ENABLED,
-    .ampdu_tx_enable = WIFI_AMPDU_TX_ENABLED,
-    .amsdu_tx_enable = WIFI_AMSDU_TX_ENABLED,
-    .nvs_enable = 0, // currently unsupported
-    .nano_enable = WIFI_NANO_FORMAT_ENABLED,
-    .rx_ba_win = WIFI_DEFAULT_RX_BA_WIN,
-    .wifi_task_core_id = WIFI_TASK_CORE_ID,
-    .beacon_max_len = WIFI_SOFTAP_BEACON_MAX_LEN,
-    .mgmt_sbuf_num = WIFI_MGMT_SBUF_NUM,
-    .feature_caps = WIFI_FEATURE_CAPS,
-    .sta_disconnected_pm = WIFI_STA_DISCONNECTED_PM_ENABLED,
-    .espnow_max_encrypt_num = CONFIG_ESP_WIFI_ESPNOW_MAX_ENCRYPT_NUM,
-    .magic = WIFI_INIT_CONFIG_MAGIC
+/* Stub for the WIFI_INIT_CONFIG_DEFAULT() macro; we actually use espradio_osi_funcs below */
+wifi_osi_funcs_t g_wifi_osi_funcs = {0};
+
+const wpa_crypto_funcs_t g_wifi_default_wpa_crypto_funcs = {
+    .size = sizeof(wpa_crypto_funcs_t),
+    .version = ESP_WIFI_CRYPTO_VERSION,
 };
 
-static char evt;
-esp_event_base_t const WIFI_EVENT = &evt;
+esp_err_t espradio_wifi_init(void) {
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    cfg.osi_funcs = &espradio_osi_funcs;
+    cfg.nvs_enable = 0;
+
+    esp_err_t ret = esp_wifi_init_internal(&cfg);
+    if (ret != 0 && (ret < 0x3FC00000 || ret > 0x40400000)) {
+        return ret;
+    }
+
+    /* wifi_init_completed() is called from Go after a delay, when the worker has already processed cmd 15 */
+    return ret;
+}
+
+void espradio_wifi_init_completed(void) {
+    wifi_init_completed();
+}
+
+/* Minimal symbol expected by blobs (wifi_event_post in libnet80211.a).
+ * In IDF this is ESP_EVENT_DECLARE_BASE(WIFI_EVENT), i.e. extern esp_event_base_t const WIFI_EVENT;
+ * where esp_event_base_t = const char*. Here we provide the same definition without linking libesp_event. */
+esp_event_base_t const WIFI_EVENT = "WIFI_EVENT";
 
 void net80211_printf(const char *format, ...) {
     va_list args;
