@@ -20,10 +20,8 @@ type NetDev struct {
 	done chan struct{}
 }
 
-// StartNetDev registers the RX callback and starts the receive pump.
-// Call after Connect() succeeds.
-func StartNetDev() (*NetDev, error) {
-	if code := C.espradio_netif_start_rx(); code != C.ESP_OK {
+func startNetDev(apMode int) (*NetDev, error) {
+	if code := C.espradio_netif_start_rx(C.int(apMode)); code != C.ESP_OK {
 		return nil, makeError(code)
 	}
 	nd := &NetDev{
@@ -32,6 +30,16 @@ func StartNetDev() (*NetDev, error) {
 	}
 	go nd.rxPump()
 	return nd, nil
+}
+
+// StartNetDev registers the STA RX callback and starts the receive pump.
+func StartNetDev() (*NetDev, error) {
+	return startNetDev(0)
+}
+
+// StartNetDevAP registers the AP RX callback and starts the receive pump.
+func StartNetDevAP() (*NetDev, error) {
+	return startNetDev(1)
 }
 
 func (nd *NetDev) rxPump() {
@@ -93,6 +101,11 @@ func (nd *NetDev) HardwareAddr() ([6]byte, error) {
 
 func (nd *NetDev) MTU() int {
 	return EthMTU
+}
+
+// NetifRxStats returns (callback_count, drop_count) from the C ring buffer.
+func NetifRxStats() (uint32, uint32) {
+	return uint32(C.espradio_netif_rx_cb_count()), uint32(C.espradio_netif_rx_cb_drop())
 }
 
 func (nd *NetDev) Close() {

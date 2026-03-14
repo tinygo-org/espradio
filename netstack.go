@@ -60,7 +60,11 @@ var (
 // ---------------------------------------------------------------------------
 
 type NetStackConfig struct {
-	Debug bool
+	Debug    bool
+	StaticIP [4]byte
+	Gateway  [4]byte
+	Mask     [4]byte
+	DNS      [4]byte
 }
 
 type NetStack struct {
@@ -110,13 +114,13 @@ type sock struct {
 // NewNetStack creates a TCP/IP stack on top of an L2Device.
 // It runs DHCP to obtain an IP address before returning.
 func NewNetStack(dev L2Device, cfg ...NetStackConfig) (*NetStack, error) {
-	var debug bool
+	var c NetStackConfig
 	if len(cfg) > 0 {
-		debug = cfg[0].Debug
+		c = cfg[0]
 	}
 	ns := &NetStack{
 		dev:      dev,
-		debug:    debug,
+		debug:    c.Debug,
 		arpCache: make(map[[4]byte][6]byte),
 		arpWait:  make(map[[4]byte][]chan [6]byte),
 		socks:    make(map[int]*sock),
@@ -131,9 +135,19 @@ func NewNetStack(dev L2Device, cfg ...NetStackConfig) (*NetStack, error) {
 	ns.dbg("starting rxLoop")
 	go ns.rxLoop()
 
-	ns.dbg("starting DHCP")
-	if err := ns.dhcp(); err != nil {
-		return nil, err
+	if c.StaticIP != zeroIP4 {
+		ns.ip = c.StaticIP
+		ns.gw = c.Gateway
+		ns.mask = c.Mask
+		ns.dns = c.DNS
+		if ns.debug {
+			println("netstack: static IP", fmtI(ns.ip), "GW", fmtI(ns.gw))
+		}
+	} else {
+		ns.dbg("starting DHCP")
+		if err := ns.dhcp(); err != nil {
+			return nil, err
+		}
 	}
 	return ns, nil
 }
@@ -873,6 +887,138 @@ func parseDHCPReply(d []byte) (yourIP, serverIP, gwIP, maskIP, dnsIP [4]byte) {
 		opts = opts[2+ol:]
 	}
 	return
+}
+
+// ---------------------------------------------------------------------------
+// DHCP server (minimal, for AP mode)
+// ---------------------------------------------------------------------------
+
+// RunDHCPServer listens on UDP:67 and hands out addresses from a small pool.
+// Blocks forever — run as a goroutine.
+func (ns *NetStack) RunDHCPServer() {
+	const (
+		poolStart = 2
+		poolEnd   = 10
+	)
+
+	ch := make(chan []byte, 4)
+	ns.mu.Lock()
+	fd := ns.nextFD
+	ns.nextFD++
+	ns.socks[fd] = &sock{typ: _SOCK_DGRAM, localPort: 67, udpRx: ch}
+	ns.mu.Unlock()
+
+	leases := make(map[[6]byte]byte) // MAC → last octet
+
+	for {
+		data := <-ch
+		if len(data) < 244 {
+			continue
+		}
+		if data[0] != 1 { // must be BOOTREQUEST
+			continue
+		}
+		var clientMAC [6]byte
+		copy(clientMAC[:], data[28:34])
+
+		xid := binary.BigEndian.Uint32(data[4:8])
+
+		msgType := byte(0)
+		opts := data[240:]
+		for len(opts) > 2 {
+			t := opts[0]
+			if t == 255 {
+				break
+			}
+			if t == 0 {
+				opts = opts[1:]
+				continue
+			}
+			ol := int(opts[1])
+			if len(opts) < 2+ol {
+				break
+			}
+			if t == 53 && ol == 1 {
+				msgType = opts[2]
+			}
+			opts = opts[2+ol:]
+		}
+
+		if msgType != 1 && msgType != 3 {
+			continue
+		}
+
+		assigned, ok := leases[clientMAC]
+		if !ok {
+			assigned = byte(poolStart + len(leases))
+			if assigned > poolEnd {
+				continue
+			}
+			leases[clientMAC] = assigned
+		}
+
+		offeredIP := ns.ip
+		offeredIP[3] = assigned
+
+		var replyType byte
+		if msgType == 1 {
+			replyType = 2 // Offer
+		} else {
+			replyType = 5 // ACK
+		}
+
+		reply := ns.buildDHCPReply(xid, replyType, offeredIP, clientMAC)
+
+		udp := make([]byte, 8+len(reply))
+		binary.BigEndian.PutUint16(udp[0:2], 67)
+		binary.BigEndian.PutUint16(udp[2:4], 68)
+		binary.BigEndian.PutUint16(udp[4:6], uint16(len(udp)))
+		copy(udp[8:], reply)
+
+		ns.sendIPWith(bcastMAC, ns.ip, bcastIP4, 17, udp)
+	}
+}
+
+func (ns *NetStack) buildDHCPReply(xid uint32, msgType byte, clientIP [4]byte, clientMAC [6]byte) []byte {
+	dhcp := make([]byte, 300)
+	dhcp[0] = 2 // BOOTREPLY
+	dhcp[1] = 1 // Ethernet
+	dhcp[2] = 6
+	binary.BigEndian.PutUint32(dhcp[4:8], xid)
+	copy(dhcp[16:20], clientIP[:])
+	copy(dhcp[20:24], ns.ip[:]) // siaddr
+	copy(dhcp[28:34], clientMAC[:])
+	copy(dhcp[236:240], []byte{99, 130, 83, 99}) // magic cookie
+
+	o := dhcp[240:]
+	i := 0
+	// opt 53: DHCP Message Type
+	o[i], o[i+1], o[i+2] = 53, 1, msgType
+	i += 3
+	// opt 54: Server Identifier
+	o[i], o[i+1] = 54, 4
+	copy(o[i+2:i+6], ns.ip[:])
+	i += 6
+	// opt 51: Lease Time (1 hour)
+	o[i], o[i+1] = 51, 4
+	binary.BigEndian.PutUint32(o[i+2:i+6], 3600)
+	i += 6
+	// opt 1: Subnet Mask
+	o[i], o[i+1] = 1, 4
+	copy(o[i+2:i+6], ns.mask[:])
+	i += 6
+	// opt 3: Router
+	o[i], o[i+1] = 3, 4
+	copy(o[i+2:i+6], ns.ip[:])
+	i += 6
+	// opt 6: DNS
+	if ns.dns != zeroIP4 {
+		o[i], o[i+1] = 6, 4
+		copy(o[i+2:i+6], ns.dns[:])
+		i += 6
+	}
+	o[i] = 255 // end
+	return dhcp
 }
 
 // ---------------------------------------------------------------------------

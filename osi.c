@@ -443,7 +443,6 @@ extern void espradio_on_wifi_event(int32_t event_id, void *data);
 
 static void espradio_wifi_event_cb(void *arg, esp_event_base_t base, int32_t id, void *data) {
     (void)arg;
-    printf("WIFI_EVENT_CB: id=%ld data=%p\n", (long)id, data);
     espradio_on_wifi_event(id, data);
 }
 
@@ -459,8 +458,6 @@ void espradio_event_register_default_cb(void) {
  *************************************************************************/
 esp_err_t esp_event_post(esp_event_base_t event_base, int32_t event_id, const void* event_data, size_t event_data_size, uint32_t ticks_to_wait) {
     (void)ticks_to_wait;
-    printf("EVENT_POST: base=%s id=%ld size=%zu\n",
-           event_base ? event_base : "(null)", (long)event_id, (size_t)event_data_size);
 #if ESPRADIO_OSI_DEBUG
     printf("CCHK: event_post called\n");
     fflush(stdout);

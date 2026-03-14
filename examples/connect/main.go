@@ -16,7 +16,7 @@ func main() {
 
 	println("initializing radio...")
 	err := espradio.Enable(espradio.Config{
-		Logging: espradio.LogLevelInfo,
+		Logging: espradio.LogLevelNone,
 	})
 	if err != nil {
 		println("could not enable radio:", err)
@@ -49,7 +49,7 @@ func main() {
 	}
 
 	println("starting TCP/IP stack (DHCP)...")
-	ns, err := espradio.NewNetStack(nd, espradio.NetStackConfig{Debug: true})
+	ns, err := espradio.NewNetStack(nd, espradio.NetStackConfig{Debug: false})
 	if err != nil {
 		println("netstack failed:", err)
 		return
