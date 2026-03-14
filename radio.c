@@ -6,6 +6,16 @@
 #include <stdarg.h>
 #include <string.h>
 
+#ifndef ESPRADIO_RADIO_DEBUG
+#define ESPRADIO_RADIO_DEBUG 0
+#endif
+
+#if ESPRADIO_RADIO_DEBUG
+#define RADIO_DBG(...) printf(__VA_ARGS__)
+#else
+#define RADIO_DBG(...) ((void)0)
+#endif
+
 /* ROM printf/lock hooks, see esp32c3.rom.ld / esp32c3.rom.api.ld. */
 extern void ets_install_uart_printf(void);
 extern void ets_install_lock(void (*lock)(void), void (*unlock)(void));
@@ -119,10 +129,10 @@ void espradio_rom_hooks_init(void) {
 
 esp_err_t espradio_wifi_init(void) {
     espradio_rom_hooks_init();
-    printf("espradio: early_reset_reason cpu0=%d cpu1=%d\n",
-           rtc_get_reset_reason(0), rtc_get_reset_reason(1));
+    RADIO_DBG("espradio: early_reset_reason cpu0=%d cpu1=%d\n",
+              rtc_get_reset_reason(0), rtc_get_reset_reason(1));
     phy_get_romfunc_addr();
-    printf("espradio: phy_get_romfunc_addr g_phyFuns=%p\n", g_phyFuns);
+    RADIO_DBG("espradio: phy_get_romfunc_addr g_phyFuns=%p\n", g_phyFuns);
 #if ESPRADIO_PHY_PATCH_ROMFUNCS
     espradio_phy_patch_romfuncs();
 #endif
@@ -138,16 +148,16 @@ esp_err_t espradio_wifi_init(void) {
     esp_wifi_set_sleep_min_active_time(50000);
     esp_wifi_set_keep_alive_time(10000000);
     esp_wifi_set_sleep_wait_broadcast_data_time(15000);
-    printf("espradio: before esp_wifi_bt_power_domain_on\n");
+    RADIO_DBG("espradio: before esp_wifi_bt_power_domain_on\n");
     esp_wifi_bt_power_domain_on();
-    printf("espradio: after esp_wifi_bt_power_domain_on\n");
+    RADIO_DBG("espradio: after esp_wifi_bt_power_domain_on\n");
     espradio_bt_irq_prewire();
 
     extern void espradio_coex_adapter_init(void);
     extern int coex_pre_init(void);
     espradio_coex_adapter_init();
     int coex_rc = coex_pre_init();
-    printf("espradio: coex_pre_init -> %d\n", coex_rc);
+    RADIO_DBG("espradio: coex_pre_init -> %d\n", coex_rc);
 
     esp_err_t ret = esp_wifi_init_internal(&cfg);
     if (ret == 0) {
@@ -156,14 +166,14 @@ esp_err_t espradio_wifi_init(void) {
 
         extern esp_err_t esp_supplicant_init(void);
         esp_err_t sup_rc = esp_supplicant_init();
-        printf("espradio: esp_supplicant_init -> %d\n", (int)sup_rc);
+        RADIO_DBG("espradio: esp_supplicant_init -> %d\n", (int)sup_rc);
     }
     return ret;
 }
 
 void espradio_wifi_init_completed(void) {
     wifi_init_completed();
-    printf("espradio: wifi_init_completed\n");
+    RADIO_DBG("espradio: wifi_init_completed\n");
 }
 
 /* Minimal symbol expected by blobs (wifi_event_post in libnet80211.a).
@@ -172,28 +182,40 @@ void espradio_wifi_init_completed(void) {
 esp_event_base_t const WIFI_EVENT = "WIFI_EVENT";
 
 __attribute__((weak)) void net80211_printf(const char *format, ...) {
+#if ESPRADIO_RADIO_DEBUG
     va_list args;
     va_start(args, format);
     printf("espradio net80211: ");
     vprintf(format, args);
     va_end(args);
+#else
+    (void)format;
+#endif
 }
 
 static volatile uint32_t s_phy_printf_count;
 
 __attribute__((weak)) void phy_printf(const char *format, ...) {
+#if ESPRADIO_RADIO_DEBUG
     uint32_t n = s_phy_printf_count++;
     va_list args;
     va_start(args, format);
     printf("espradio phy: [%lu] ", (unsigned long)n);
     vprintf(format, args);
     va_end(args);
+#else
+    (void)format;
+#endif
 }
 
 __attribute__((weak)) void pp_printf(const char *format, ...) {
+#if ESPRADIO_RADIO_DEBUG
     va_list args;
     va_start(args, format);
     printf("espradio pp: ");
     vprintf(format, args);
     va_end(args);
+#else
+    (void)format;
+#endif
 }

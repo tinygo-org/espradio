@@ -12,6 +12,10 @@
 
 #include "include.h"
 
+#ifndef ESPRADIO_LIB_DEBUG
+#define ESPRADIO_LIB_DEBUG 0
+#endif
+
 extern uint64_t espradio_time_us_now(void);
 extern void espradio_task_delay(uint32_t ticks);
 

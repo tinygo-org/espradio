@@ -5,8 +5,8 @@
 
 extern void intr_matrix_set(uint32_t cpu_no, uint32_t model_num, uint32_t intr_num);
 
-#ifndef ESPRADIO_OSI_DEBUG
-#define ESPRADIO_OSI_DEBUG 0
+#ifndef ESPRADIO_ISR_DEBUG
+#define ESPRADIO_ISR_DEBUG 0
 #endif
 
 /* ---- ISR fn/arg storage ---- */
@@ -19,7 +19,7 @@ void espradio_set_isr(int32_t n, void *f, void *arg) {
         s_isr_fn[n] = (void (*)(void *))f;
         s_isr_arg[n] = arg;
     }
-#if ESPRADIO_OSI_DEBUG
+#if ESPRADIO_ISR_DEBUG
     printf("osi: set_isr n=%ld f=%p arg=%p\n", (long)n, f, arg);
 #endif
 }
@@ -31,7 +31,7 @@ static volatile uint32_t s_in_isr = 0;
 void espradio_call_saved_isr(int32_t n) {
     s_in_isr = 1;
     __asm__ volatile ("fence" ::: "memory");
-#if ESPRADIO_OSI_DEBUG    
+#if ESPRADIO_ISR_DEBUG    
     printf("ISR: n=%ld fn=%p arg=%p\n", (long)n,
            (n >= 0 && n < 32) ? (void *)s_isr_fn[n] : NULL,
            (n >= 0 && n < 32) ? s_isr_arg[n] : NULL);
@@ -39,7 +39,7 @@ void espradio_call_saved_isr(int32_t n) {
     if (n >= 0 && n < 32 && s_isr_fn[n]) {
         s_isr_fn[n](s_isr_arg[n]);
     }
-#if ESPRADIO_OSI_DEBUG     
+#if ESPRADIO_ISR_DEBUG     
     printf("ISR: done n=%ld\n", (long)n);
 #endif
     __asm__ volatile ("fence" ::: "memory");
@@ -64,7 +64,7 @@ void espradio_set_intr(int32_t cpu_no, uint32_t intr_source, uint32_t intr_num, 
         cpu_no = 0;
     }
     intr_matrix_set((uint32_t)cpu_no, intr_source, intr_num);
-#if ESPRADIO_OSI_DEBUG
+#if ESPRADIO_ISR_DEBUG
     printf("osi: set_intr cpu=%ld src=%lu num=%lu prio=%ld\n",
            (long)cpu_no, (unsigned long)intr_source, (unsigned long)intr_num, (long)intr_prio);
 #endif
@@ -73,7 +73,7 @@ void espradio_set_intr(int32_t cpu_no, uint32_t intr_source, uint32_t intr_num, 
 void espradio_clear_intr(uint32_t intr_source, uint32_t intr_num) {
     (void)intr_num;
     intr_matrix_set(0, intr_source, 0);
-#if ESPRADIO_OSI_DEBUG
+#if ESPRADIO_ISR_DEBUG
     printf("osi: clear_intr src=%lu num=%lu\n",
            (unsigned long)intr_source, (unsigned long)intr_num);
 #endif
@@ -84,14 +84,14 @@ extern void ets_isr_mask(uint32_t mask);
 
 void espradio_ints_on(uint32_t mask) {
     ets_isr_unmask(mask);
-#if ESPRADIO_OSI_DEBUG
+#if ESPRADIO_ISR_DEBUG
     printf("osi: ints_on mask=0x%08lx\n", (unsigned long)mask);
 #endif
 }
 
 void espradio_ints_off(uint32_t mask) {
     ets_isr_mask(mask);
-#if ESPRADIO_OSI_DEBUG
+#if ESPRADIO_ISR_DEBUG
     printf("osi: ints_off mask=0x%08lx\n", (unsigned long)mask);
 #endif
 }

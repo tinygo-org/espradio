@@ -4,6 +4,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#ifndef ESPRADIO_ARENA_DEBUG
+#define ESPRADIO_ARENA_DEBUG 0
+#endif
+
 #ifndef ESPRADIO_USE_ARENA
 #define ESPRADIO_USE_ARENA 0
 #endif

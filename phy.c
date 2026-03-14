@@ -3,6 +3,16 @@
 #include "sdkconfig.h"
 #include "include.h"
 
+#ifndef ESPRADIO_PHY_DEBUG
+#define ESPRADIO_PHY_DEBUG 0
+#endif
+
+#if ESPRADIO_PHY_DEBUG
+#define PHY_DBG(...) printf(__VA_ARGS__)
+#else
+#define PHY_DBG(...) ((void)0)
+#endif
+
 extern void *g_phyFuns;                 /* libphy.a: ROM function table for PHY (used by set_chanfreq) */
 extern uint32_t rom_chip_i2c_readReg(uint32_t block, uint32_t host_id, uint32_t reg_add);
 extern void rom_chip_i2c_writeReg(uint32_t block, uint32_t host_id, uint32_t reg_add, uint32_t data);
@@ -91,9 +101,9 @@ static uint32_t phy_rom_stub_trace(const char *slot, uint32_t limit,
                                    uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3) {
     uint32_t n = s_phy_stub_calls++;
     if (s_phy_hook_trace_enabled && n < limit) {
-        printf("espradio: g_phyFuns[%s] a0=%lu a1=%lu a2=%lu a3=%lu\n",
-               slot,
-               (unsigned long)a0, (unsigned long)a1, (unsigned long)a2, (unsigned long)a3);
+        PHY_DBG("espradio: g_phyFuns[%s] a0=%lu a1=%lu a2=%lu a3=%lu\n",
+                slot,
+                (unsigned long)a0, (unsigned long)a1, (unsigned long)a2, (unsigned long)a3);
     }
     return 0;
 }
@@ -103,15 +113,15 @@ static uint32_t phy_rom_stub_rf_write(const char *slot,
                                       uint32_t a4, uint32_t a5) {
     uint32_t n = s_phy_rf_trace_calls++;
     if (s_phy_hook_trace_enabled && n < 24u) {
-        printf("espradio: g_phyFuns[%s] early-write a0=%lu a1=%lu a2=%lu a3=%lu a4=%lu a5=%lu\n",
-               slot,
-               (unsigned long)a0, (unsigned long)a1, (unsigned long)a2, (unsigned long)a3,
-               (unsigned long)a4, (unsigned long)a5);
+        PHY_DBG("espradio: g_phyFuns[%s] early-write a0=%lu a1=%lu a2=%lu a3=%lu a4=%lu a5=%lu\n",
+                slot,
+                (unsigned long)a0, (unsigned long)a1, (unsigned long)a2, (unsigned long)a3,
+                (unsigned long)a4, (unsigned long)a5);
     } else if (s_phy_hook_trace_enabled && n < 96 && (a0 == 0x62u || a0 == 0x63u) && a1 == 1u) {
-        printf("espradio: g_phyFuns[%s] write a0=%lu a1=%lu a2=%lu a3=%lu a4=%lu a5=%lu\n",
-               slot,
-               (unsigned long)a0, (unsigned long)a1, (unsigned long)a2, (unsigned long)a3,
-               (unsigned long)a4, (unsigned long)a5);
+        PHY_DBG("espradio: g_phyFuns[%s] write a0=%lu a1=%lu a2=%lu a3=%lu a4=%lu a5=%lu\n",
+                slot,
+                (unsigned long)a0, (unsigned long)a1, (unsigned long)a2, (unsigned long)a3,
+                (unsigned long)a4, (unsigned long)a5);
     }
     return 0;
 }
@@ -153,9 +163,9 @@ static uint32_t phy_rom_stub_trace_0x1ac(uint32_t a0, uint32_t a1, uint32_t a2) 
     }
     if (s_phy_hook_trace_enabled) {
         if (call <= 48u || same == 0u || ((s_phy_1ac_repeat & 63u) == 0u)) {
-            printf("espradio: g_phyFuns[0x1ac] n=%lu rep=%lu a0=%lu a1=%lu a2=%lu\n",
-                   (unsigned long)call, (unsigned long)s_phy_1ac_repeat,
-                   (unsigned long)a0, (unsigned long)a1, (unsigned long)a2);
+            PHY_DBG("espradio: g_phyFuns[0x1ac] n=%lu rep=%lu a0=%lu a1=%lu a2=%lu\n",
+                    (unsigned long)call, (unsigned long)s_phy_1ac_repeat,
+                    (unsigned long)a0, (unsigned long)a1, (unsigned long)a2);
         }
     }
     uint32_t ret = 0;
@@ -163,32 +173,32 @@ static uint32_t phy_rom_stub_trace_0x1ac(uint32_t a0, uint32_t a1, uint32_t a2) 
     if (s_rom_phy_1ac) {
         ret = s_rom_phy_1ac(a0, host, a2);
         if (s_phy_hook_trace_enabled && host != a1 && call <= 128u) {
-            printf("espradio: g_phyFuns[0x1ac] host-remap a0=%lu h=%lu->%lu a2=%lu ret=0x%02lx\n",
-                   (unsigned long)a0, (unsigned long)a1, (unsigned long)host, (unsigned long)a2,
-                   (unsigned long)(ret & 0xffu));
+            PHY_DBG("espradio: g_phyFuns[0x1ac] host-remap a0=%lu h=%lu->%lu a2=%lu ret=0x%02lx\n",
+                    (unsigned long)a0, (unsigned long)a1, (unsigned long)host, (unsigned long)a2,
+                    (unsigned long)(ret & 0xffu));
         }
     } else {
         ret = rom_chip_i2c_readReg(a0, host, a2) & 0xffu;
     }
     if (s_phy_hook_trace_enabled && call <= 16u &&
         (a0 == 102u || a0 == 106u || a0 == 97u || a0 == 103u)) {
-        printf("espradio: g_phyFuns[0x1ac] ret-early n=%lu a0=%lu a1=%lu a2=%lu ret=0x%02lx\n",
-               (unsigned long)call,
-               (unsigned long)a0, (unsigned long)a1, (unsigned long)a2,
-               (unsigned long)(ret & 0xffu));
+        PHY_DBG("espradio: g_phyFuns[0x1ac] ret-early n=%lu a0=%lu a1=%lu a2=%lu ret=0x%02lx\n",
+                (unsigned long)call,
+                (unsigned long)a0, (unsigned long)a1, (unsigned long)a2,
+                (unsigned long)(ret & 0xffu));
     }
     if (s_phy_hook_trace_enabled && a0 == 0x62u && a1 == 1u &&
         (a2 == 0x0cu || a2 == 7u || a2 == 5u || a2 == 0x0bu)) {
         uint32_t sel = (ret >> 2) & 3u;
-        printf("espradio: g_phyFuns[0x1ac] ret a0=%lu a1=%lu a2=%lu ret=0x%02lx sel=%lu\n",
-               (unsigned long)a0, (unsigned long)a1, (unsigned long)a2,
-               (unsigned long)(ret & 0xffu), (unsigned long)sel);
+        PHY_DBG("espradio: g_phyFuns[0x1ac] ret a0=%lu a1=%lu a2=%lu ret=0x%02lx sel=%lu\n",
+                (unsigned long)a0, (unsigned long)a1, (unsigned long)a2,
+                (unsigned long)(ret & 0xffu), (unsigned long)sel);
     }
     return ret;
 }
 
 static void phy_rom_stub_trace_0x228(void) {
-    printf("espradio: g_phyFuns[0x228] call\n");
+    PHY_DBG("espradio: g_phyFuns[0x228] call\n");
     if (s_rom_phy_228) {
         s_rom_phy_228();
     }
@@ -207,16 +217,16 @@ static uint32_t phy_rom_stub_trace_0x1b4(uint32_t a0, uint32_t a1, uint32_t a2,
         phy_verify_write_full(a0, host, a2, a3, "0x1b4");
 #endif
         if (s_phy_hook_trace_enabled && host != a1 && c <= 24u) {
-            printf("espradio: g_phyFuns[0x1b4] host-remap n=%lu a0=%lu h=%lu->%lu a2=%lu a3=%lu rc=0x%02lx\n",
-                   (unsigned long)c,
-                   (unsigned long)a0, (unsigned long)a1, (unsigned long)host,
-                   (unsigned long)a2, (unsigned long)a3, (unsigned long)(rc & 0xffu));
+            PHY_DBG("espradio: g_phyFuns[0x1b4] host-remap n=%lu a0=%lu h=%lu->%lu a2=%lu a3=%lu rc=0x%02lx\n",
+                    (unsigned long)c,
+                    (unsigned long)a0, (unsigned long)a1, (unsigned long)host,
+                    (unsigned long)a2, (unsigned long)a3, (unsigned long)(rc & 0xffu));
         }
         if (s_phy_hook_trace_enabled && c <= 24u) {
-            printf("espradio: g_phyFuns[0x1b4] early-ret n=%lu a0=%lu a1=%lu a2=%lu rc=0x%02lx\n",
-                   (unsigned long)c,
-                   (unsigned long)a0, (unsigned long)a1, (unsigned long)a2,
-                   (unsigned long)(rc & 0xffu));
+            PHY_DBG("espradio: g_phyFuns[0x1b4] early-ret n=%lu a0=%lu a1=%lu a2=%lu rc=0x%02lx\n",
+                    (unsigned long)c,
+                    (unsigned long)a0, (unsigned long)a1, (unsigned long)a2,
+                    (unsigned long)(rc & 0xffu));
         }
         espradio_pll_trace_readback("w", a0, a1, a2, a3);
         return rc;
@@ -252,16 +262,16 @@ static uint32_t phy_rom_stub_trace_0x1bc(uint32_t a0, uint32_t a1, uint32_t a2,
         phy_verify_write_mask(a0, host, a2, mask, expected_bits, "0x1bc");
 #endif
         if (s_phy_hook_trace_enabled && host != a1 && c <= 24u) {
-            printf("espradio: g_phyFuns[0x1bc] host-remap n=%lu a0=%lu h=%lu->%lu a2=%lu rc=0x%02lx\n",
-                   (unsigned long)c,
-                   (unsigned long)a0, (unsigned long)a1, (unsigned long)host, (unsigned long)a2,
-                   (unsigned long)(rc & 0xffu));
+            PHY_DBG("espradio: g_phyFuns[0x1bc] host-remap n=%lu a0=%lu h=%lu->%lu a2=%lu rc=0x%02lx\n",
+                    (unsigned long)c,
+                    (unsigned long)a0, (unsigned long)a1, (unsigned long)host, (unsigned long)a2,
+                    (unsigned long)(rc & 0xffu));
         }
         if (s_phy_hook_trace_enabled && c <= 24u) {
-            printf("espradio: g_phyFuns[0x1bc] early-ret n=%lu a0=%lu a1=%lu a2=%lu rc=0x%02lx\n",
-                   (unsigned long)c,
-                   (unsigned long)a0, (unsigned long)a1, (unsigned long)a2,
-                   (unsigned long)(rc & 0xffu));
+            PHY_DBG("espradio: g_phyFuns[0x1bc] early-ret n=%lu a0=%lu a1=%lu a2=%lu rc=0x%02lx\n",
+                    (unsigned long)c,
+                    (unsigned long)a0, (unsigned long)a1, (unsigned long)a2,
+                    (unsigned long)(rc & 0xffu));
         }
         {
             uint32_t full = rom_chip_i2c_readReg(a0, host, a2) & 0xffu;
@@ -284,13 +294,13 @@ static uint32_t phy_rom_stub_trace_0x1b8(uint32_t a0, uint32_t a1, uint32_t a2,
     uint32_t c = ++s_phy_1b8_calls;
     uint32_t n = s_phy_rf_trace_calls++;
     if (s_phy_hook_trace_enabled && n < 24u) {
-        printf("espradio: g_phyFuns[0x1b8] early-read a0=%lu a1=%lu a2=%lu a3=%lu a4=%lu a5=%lu\n",
-               (unsigned long)a0, (unsigned long)a1, (unsigned long)a2, (unsigned long)a3,
-               (unsigned long)a4, (unsigned long)a5);
+        PHY_DBG("espradio: g_phyFuns[0x1b8] early-read a0=%lu a1=%lu a2=%lu a3=%lu a4=%lu a5=%lu\n",
+                (unsigned long)a0, (unsigned long)a1, (unsigned long)a2, (unsigned long)a3,
+                (unsigned long)a4, (unsigned long)a5);
     } else if (s_phy_hook_trace_enabled && n < 128 && a0 == 0x62u && a1 == 1u && a2 == 7u) {
-        printf("espradio: g_phyFuns[0x1b8] read  a0=%lu a1=%lu a2=%lu a3=%lu a4=%lu a5=%lu\n",
-               (unsigned long)a0, (unsigned long)a1, (unsigned long)a2, (unsigned long)a3,
-               (unsigned long)a4, (unsigned long)a5);
+        PHY_DBG("espradio: g_phyFuns[0x1b8] read  a0=%lu a1=%lu a2=%lu a3=%lu a4=%lu a5=%lu\n",
+                (unsigned long)a0, (unsigned long)a1, (unsigned long)a2, (unsigned long)a3,
+                (unsigned long)a4, (unsigned long)a5);
     }
     uint32_t host = phy_fix_host(a0, a1);
     uint32_t cur;
@@ -315,8 +325,8 @@ static uint32_t phy_rom_stub_trace_0x1b8(uint32_t a0, uint32_t a1, uint32_t a2,
 #if ESPRADIO_PLL_FORCE_CAL_READY_AFTER > 0u
         if (s_phy_pll_cal_reads >= ESPRADIO_PLL_FORCE_CAL_READY_AFTER) {
             if (s_phy_hook_trace_enabled) {
-                printf("espradio: force pll-cal ready on read=%lu\n",
-                       (unsigned long)s_phy_pll_cal_reads);
+                PHY_DBG("espradio: force pll-cal ready on read=%lu\n",
+                        (unsigned long)s_phy_pll_cal_reads);
             }
             return 1u;
         }
@@ -326,14 +336,14 @@ static uint32_t phy_rom_stub_trace_0x1b8(uint32_t a0, uint32_t a1, uint32_t a2,
     espradio_pll_note_read(a0, host, a2, msb, lsb, v_chip);
     espradio_pll_trace_i2c("r", a0, host, a2, v_chip, msb, lsb);
     if (s_phy_hook_trace_enabled && n < 128 && a0 == 0x62 && a1 == 1 && a2 == 7) {
-        printf("espradio: g_phyFuns[0x1b8] vals raw=0x%02lx chip=%lu\n",
-               (unsigned long)cur, (unsigned long)v_chip);
+        PHY_DBG("espradio: g_phyFuns[0x1b8] vals raw=0x%02lx chip=%lu\n",
+                (unsigned long)cur, (unsigned long)v_chip);
     }
     if (s_phy_hook_trace_enabled && c <= 24u) {
-        printf("espradio: g_phyFuns[0x1b8] early-ret n=%lu a0=%lu a1=%lu->%lu a2=%lu v=0x%02lx\n",
-               (unsigned long)c,
-               (unsigned long)a0, (unsigned long)a1, (unsigned long)host, (unsigned long)a2,
-               (unsigned long)(v_chip & 0xffu));
+        PHY_DBG("espradio: g_phyFuns[0x1b8] early-ret n=%lu a0=%lu a1=%lu->%lu a2=%lu v=0x%02lx\n",
+                (unsigned long)c,
+                (unsigned long)a0, (unsigned long)a1, (unsigned long)host, (unsigned long)a2,
+                (unsigned long)(v_chip & 0xffu));
     }
     return v_chip;
 }
@@ -354,13 +364,13 @@ void espradio_phy_funs_install(void) {
     phy_funs_stub_table[0x1b8 / 4] = (uint32_t)(uintptr_t)phy_rom_stub_trace_0x1b8;
     phy_funs_stub_table[0x1bc / 4] = (uint32_t)(uintptr_t)phy_rom_stub_trace_0x1bc;
     g_phyFuns = (void *)phy_funs_stub_table;
-    printf("espradio: g_phyFuns install (%u slots), trace: 0x64 0x68 0x6c 0x100 0x104 0x108 0x1b4 0x1b8 0x1bc\n",
-           (unsigned)G_PHYFUNS_NUM_SLOTS);
+    PHY_DBG("espradio: g_phyFuns install (%u slots), trace: 0x64 0x68 0x6c 0x100 0x104 0x108 0x1b4 0x1b8 0x1bc\n",
+            (unsigned)G_PHYFUNS_NUM_SLOTS);
 }
 
 void espradio_phy_patch_romfuncs(void) {
     if (!g_phyFuns) {
-        printf("espradio: g_phyFuns patch skipped (null)\n");
+        PHY_DBG("espradio: g_phyFuns patch skipped (null)\n");
         return;
     }
     uint32_t *tbl = (uint32_t *)g_phyFuns;
@@ -376,9 +386,9 @@ void espradio_phy_patch_romfuncs(void) {
     tbl[0x1b8 / 4] = (uint32_t)(uintptr_t)phy_rom_stub_trace_0x1b8;
     tbl[0x1bc / 4] = (uint32_t)(uintptr_t)phy_rom_stub_trace_0x1bc;
 
-    printf("espradio: g_phyFuns patched 0x1ac/0x228/0x1b4/0x1b8/0x1bc (orig=%p/%p/%p/%p/%p)\n",
-           (void *)s_rom_phy_1ac, (void *)s_rom_phy_228,
-           (void *)s_rom_phy_1b4, (void *)s_rom_phy_1b8, (void *)s_rom_phy_1bc);
+    PHY_DBG("espradio: g_phyFuns patched 0x1ac/0x228/0x1b4/0x1b8/0x1bc (orig=%p/%p/%p/%p/%p)\n",
+            (void *)s_rom_phy_1ac, (void *)s_rom_phy_228,
+            (void *)s_rom_phy_1b4, (void *)s_rom_phy_1b8, (void *)s_rom_phy_1bc);
 }
 
 void espradio_phy_hook_trace_set(uint32_t enabled) {

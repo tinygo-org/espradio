@@ -16,8 +16,14 @@
 #define ESPRADIO_PHY_USE_PROBE 0
 #endif
 
-#ifndef ESPRADIO_PHY_DEBUG
-#define ESPRADIO_PHY_DEBUG 0
+#ifndef ESPRADIO_PHY_SHIM_DEBUG
+#define ESPRADIO_PHY_SHIM_DEBUG 0
+#endif
+
+#if ESPRADIO_PHY_SHIM_DEBUG
+#define PHY_SHIM_DBG(...) printf(__VA_ARGS__)
+#else
+#define PHY_SHIM_DBG(...) ((void)0)
 #endif
 
 
@@ -60,7 +66,7 @@ void wifi_bt_common_module_enable(void);
 void wifi_bt_common_module_disable(void);
 
 void esp_wifi_bt_power_domain_on(void) {
-    printf("espradio: esp_wifi_bt_power_domain_on\n");
+    PHY_SHIM_DBG("espradio: esp_wifi_bt_power_domain_on\n");
     while (__sync_lock_test_and_set(&s_wifi_bt_pd_lock, 1U)) {}
     uint32_t prev = s_wifi_bt_pd_ref;
     s_wifi_bt_pd_ref++;
@@ -154,8 +160,8 @@ static int espradio_register_chipv7_phy_logged(const esp_phy_init_data_t *init_d
         mac0 = cal_data->mac[0];
         mac1 = cal_data->mac[1];
     }
-    printf("espradio: register_chipv7_phy call begin init=%p cal=%p mode=%u reset_reason=%d mac=%02x:%02x\n",
-           (void *)init_data, (void *)cal_data, (unsigned)cal_mode, rr, (unsigned)mac0, (unsigned)mac1);
+    PHY_SHIM_DBG("espradio: register_chipv7_phy call begin init=%p cal=%p mode=%u reset_reason=%d mac=%02x:%02x\n",
+                 (void *)init_data, (void *)cal_data, (unsigned)cal_mode, rr, (unsigned)mac0, (unsigned)mac1);
 
     int rc = register_chipv7_phy(init_data, cal_data, cal_mode);
     mac0 = 0;
@@ -164,8 +170,8 @@ static int espradio_register_chipv7_phy_logged(const esp_phy_init_data_t *init_d
         mac0 = cal_data->mac[0];
         mac1 = cal_data->mac[1];
     }
-    printf("espradio: register_chipv7_phy call done rc=%d mac=%02x:%02x\n",
-           rc, (unsigned)mac0, (unsigned)mac1);
+    PHY_SHIM_DBG("espradio: register_chipv7_phy call done rc=%d mac=%02x:%02x\n",
+                 rc, (unsigned)mac0, (unsigned)mac1);
     return rc;
 }
 
@@ -186,8 +192,8 @@ void esp_phy_load_cal_and_init(void) {
     phy_init_param_set(1u);
     bool bbpll_usb = true;
     phy_bbpll_en_usb(bbpll_usb);
-    printf("espradio: phy_bbpll_en_usb=%u reset_reason=%d\n",
-           (unsigned)(bbpll_usb ? 1u : 0u), rr);
+    PHY_SHIM_DBG("espradio: phy_bbpll_en_usb=%u reset_reason=%d\n",
+                 (unsigned)(bbpll_usb ? 1u : 0u), rr);
     bool force_cal_none = (rr == 21);
     esp_phy_calibration_mode_t cal_mode = force_cal_none
                                               ? PHY_RF_CAL_NONE
@@ -198,12 +204,12 @@ void esp_phy_load_cal_and_init(void) {
         cal_mode = PHY_RF_CAL_FULL;
     }
     int mac_rc = espradio_hal_read_mac_go((unsigned char *)cal_data->mac, 0);
-    printf("espradio: cal_data mac rc=%d mac=%02x:%02x:%02x:%02x:%02x:%02x nvs_rc=%d cal_mode=%u\n",
-           mac_rc,
-           (unsigned)cal_data->mac[0], (unsigned)cal_data->mac[1],
-           (unsigned)cal_data->mac[2], (unsigned)cal_data->mac[3],
-           (unsigned)cal_data->mac[4], (unsigned)cal_data->mac[5],
-           (int)nvs_rc, (unsigned)cal_mode);
+    PHY_SHIM_DBG("espradio: cal_data mac rc=%d mac=%02x:%02x:%02x:%02x:%02x:%02x nvs_rc=%d cal_mode=%u\n",
+                 mac_rc,
+                 (unsigned)cal_data->mac[0], (unsigned)cal_data->mac[1],
+                 (unsigned)cal_data->mac[2], (unsigned)cal_data->mac[3],
+                 (unsigned)cal_data->mac[4], (unsigned)cal_data->mac[5],
+                 (int)nvs_rc, (unsigned)cal_mode);
     espradio_phy_debug_dump(init_data, cal_data, cal_mode);
     /* Keep trace off during rf_init; probe enables it right before bb_init. */
     espradio_phy_hook_trace_set(0u);
@@ -213,7 +219,7 @@ void esp_phy_load_cal_and_init(void) {
 #else
     int rc = espradio_register_chipv7_phy_logged(init_data, cal_data, cal_mode);
 #endif
-    printf("espradio: register_chipv7_phy rc=%d\n", rc);
+    PHY_SHIM_DBG("espradio: register_chipv7_phy rc=%d\n", rc);
     if (cal_mode != PHY_RF_CAL_NONE && (nvs_rc != ESP_OK || rc == 1)) {
         esp_phy_store_cal_data_to_nvs(cal_data);
     }
@@ -311,7 +317,7 @@ __attribute__((weak)) void phy_digital_regs_store(void) {
         s_phy_is_digital_regs_stored_local = 1u;
     } else if (s_phy_dig_reg_backup_warned_once == 0u) {
         s_phy_dig_reg_backup_warned_once = 1u;
-        printf("espradio: phy_dig_reg_backup missing\n");
+        PHY_SHIM_DBG("espradio: phy_dig_reg_backup missing\n");
     }
 }
 
@@ -396,7 +402,7 @@ __attribute__((weak)) void phy_ant_clr_update_flag(void) {
 static void espradio_phy_debug_dump(const esp_phy_init_data_t *init_data,
                                     esp_phy_calibration_data_t *cal_data,
                                     esp_phy_calibration_mode_t cal_mode) {
-#if ESPRADIO_PHY_DEBUG
+#if ESPRADIO_PHY_SHIM_DEBUG
     if (s_phy_debug_once != 0u) {
         return;
     }
@@ -423,15 +429,15 @@ static void espradio_phy_debug_dump(const esp_phy_init_data_t *init_data,
 void esp_phy_enable(uint32_t modem) {
     espradio_phy_lock();
     uint32_t modem_flags = phy_get_modem_flag();
-    printf("espradio: esp_phy_enable modem=%lu flags=%lu calibrated=%u\n",
-           (unsigned long)modem, (unsigned long)modem_flags, (unsigned)s_is_phy_calibrated);
+    PHY_SHIM_DBG("espradio: esp_phy_enable modem=%lu flags=%lu calibrated=%u\n",
+                 (unsigned long)modem, (unsigned long)modem_flags, (unsigned)s_is_phy_calibrated);
     if (modem_flags == 0u) {
         esp_phy_common_clock_enable();
         if (s_is_phy_calibrated == 0u) {
             esp_phy_load_cal_and_init();
             s_is_phy_calibrated = 1u;
         } else {
-            printf("espradio: esp_phy_enable phy_wakeup_init\n");
+            PHY_SHIM_DBG("espradio: esp_phy_enable phy_wakeup_init\n");
             phy_wakeup_init();
             phy_digital_regs_load();
         }

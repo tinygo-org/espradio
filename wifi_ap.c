@@ -3,6 +3,10 @@
 #include "include.h"
 #include <string.h>
 
+#ifndef ESPRADIO_WIFI_AP_DEBUG
+#define ESPRADIO_WIFI_AP_DEBUG 0
+#endif
+
 static esp_err_t espradio_ap_set_country_eu(void) {
     wifi_country_t c;
     esp_err_t rc = esp_wifi_get_country(&c);

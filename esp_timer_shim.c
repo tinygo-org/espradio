@@ -6,6 +6,10 @@
 #include <string.h>
 #include "blobs/include/esp_timer.h"
 
+#ifndef ESPRADIO_TIMER_SHIM_DEBUG
+#define ESPRADIO_TIMER_SHIM_DEBUG 0
+#endif
+
 extern uint64_t espradio_time_us_now(void);
 
 struct esp_timer {

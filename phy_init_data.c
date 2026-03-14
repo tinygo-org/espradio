@@ -3,6 +3,10 @@
 #include "blobs/include/esp_phy_init.h"
 #include "blobs/include/esp_err.h"
 
+#ifndef ESPRADIO_PHY_INIT_DATA_DEBUG
+#define ESPRADIO_PHY_INIT_DATA_DEBUG 0
+#endif
+
 __attribute__((weak)) esp_err_t esp_phy_load_cal_data_from_nvs(esp_phy_calibration_data_t *out_cal_data) {
     (void)out_cal_data;
     return ESP_ERR_NOT_FOUND;

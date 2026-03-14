@@ -7,3 +7,7 @@
  *
  * This file is kept for future stubs if new blob versions need them.
  */
+
+#ifndef ESPRADIO_WPA_SHIM_DEBUG
+#define ESPRADIO_WPA_SHIM_DEBUG 0
+#endif

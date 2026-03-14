@@ -1,0 +1,62 @@
+diff --git a/src/internal/task/task_stack_tinygoriscv.go b/src/internal/task/task_stack_tinygoriscv.go
+index 541dc96a..27e65424 100644
+--- a/src/internal/task/task_stack_tinygoriscv.go
++++ b/src/internal/task/task_stack_tinygoriscv.go
+@@ -71,3 +71,8 @@ func (s *state) pause() {
+ func SystemStack() uintptr {
+ 	return *runtime_systemStackPtr()
+ }
++
++//export tinygo_task_current
++func tinygo_task_current() unsafe.Pointer {
++	return unsafe.Pointer(Current())
++}
+diff --git a/targets/esp32c3.json b/targets/esp32c3.json
+index 96af15d5..674a93c7 100644
+--- a/targets/esp32c3.json
++++ b/targets/esp32c3.json
+@@ -13,7 +13,7 @@
+ 		"src/device/esp/esp32c3.S"
+ 	],
+ 	"binary-format": "esp32c3",
+-	"flash-method": "esp32jtag",
++	"flash-command": "esptool --chip=esp32c3 --port {port} write-flash 0x0 {bin}",
+ 	"serial-port": ["303a:1001"],
+ 	"openocd-interface": "esp_usb_jtag",
+ 	"openocd-target": "esp32c3",
+diff --git a/targets/esp32c3.ld b/targets/esp32c3.ld
+index 81a8c4f2..18bde260 100644
+--- a/targets/esp32c3.ld
++++ b/targets/esp32c3.ld
+@@ -29,9 +29,12 @@
+ 
+ MEMORY
+ {
+-    /* Note: DRAM and IRAM below are actually in the same 384K address space. */
+-    DRAM (rw) : ORIGIN = 0x3FC80000, LENGTH = 384K /* Internal SRAM 1 (data bus) */
+-    IRAM (x)  : ORIGIN = 0x40380000, LENGTH = 384K /* Internal SRAM 1 (instruction bus) */
++    /* Note: DRAM and IRAM below are actually in the same 384K address space.
++     * WiFi/BLE ROM variables occupy 0x3FCCE710..0x3FCDFFFC, so DRAM must
++     * stop before that boundary to prevent the Go heap from overwriting them.
++     */
++    DRAM (rw) : ORIGIN = 0x3FC80000, LENGTH = 0x4E710 /* ends at 0x3FCCE710 — WiFi/ROM boundary */
++    IRAM (x)  : ORIGIN = 0x40380000, LENGTH = 0x4E710
+ 
+     /* Note: DROM and IROM below are actually in the same 8M address space. */
+     DROM (r)  : ORIGIN = 0x3C000000, LENGTH = 8M /* Data bus (read-only) */
+@@ -59,6 +62,7 @@ SECTIONS
+     .rodata : ALIGN(4)
+     {
+         *(.rodata*)
++        *(.srodata*)
+         . = ALIGN (4);
+     } >DROM
+ 
+@@ -83,6 +87,7 @@ SECTIONS
+         . = ALIGN (4);
+         _sbss = ABSOLUTE(.);
+         *(.sbss)
++        *(.sbss.*)
+         *(.bss .bss.*)
+         . = ALIGN (4);
+         _ebss = ABSOLUTE(.);
