@@ -13,7 +13,6 @@ package espradio
 
 #include "include.h"
 void espradio_set_blob_log_level(uint32_t level);
-void espradio_trap_handler_install(void);
 esp_err_t espradio_wifi_init(void);
 void espradio_wifi_init_completed(void);
 void espradio_timer_fire(void *ptimer);
@@ -95,9 +94,10 @@ func startSchedTicker() {
 			case <-eventLoopKick:
 				// println("osi: event_loop kick recv")
 			}
-			for i := 0; i < 4; i++ {
-				C.espradio_event_loop_run_once()
-			}
+		drainISRQueue()
+		for i := 0; i < 4; i++ {
+			C.espradio_event_loop_run_once()
+		}
 			for i := 0; i < 4; i++ {
 				// println("osi: timer_poll_due call", i)
 				fired := C.espradio_timer_poll_due(8)
@@ -133,7 +133,8 @@ func Enable(config Config) error {
 	C.espradio_ensure_osi_ptr()
 	stateBefore := uint32(C.espradio_wifi_boot_state())
 	println("radio: boot_state before init=", stateBefore)
-	// C.espradio_trap_handler_install()
+	initWiFiISR()
+
 	C.espradio_event_register_default_cb()
 
 	// Уровень логов WiFi из блоба: пишем в g_log_level (блоб проверяет level <= g_log_level в wifi_log).
@@ -354,12 +355,10 @@ func espradio_task_ms_to_tick(ms uint32) int32 {
 
 //export espradio_wifi_int_disable
 func espradio_wifi_int_disable(wifi_int_mux unsafe.Pointer) uint32 {
-	// This is portENTER_CRITICAL (or portENTER_CRITICAL_ISR).
 	return uint32(interrupt.Disable())
 }
 
 //export espradio_wifi_int_restore
 func espradio_wifi_int_restore(wifi_int_mux unsafe.Pointer, tmp uint32) {
-	// This is portEXIT_CRITICAL (or portEXIT_CRITICAL_ISR).
 	interrupt.Restore(interrupt.State(tmp))
 }

@@ -118,53 +118,16 @@ static bool espradio_env_is_chip(void) {
     return true;
 }
 
-static void espradio_set_intr(int32_t cpu_no, uint32_t intr_source, uint32_t intr_num, int32_t intr_prio) {
-    (void)intr_prio;
-    if (cpu_no < 0) {
-        cpu_no = 0;
-    }
-    intr_matrix_set((uint32_t)cpu_no, intr_source, intr_num);
-#if ESPRADIO_OSI_DEBUG
-    printf("osi: set_intr cpu=%ld src=%lu num=%lu prio=%ld\n",
-           (long)cpu_no, (unsigned long)intr_source, (unsigned long)intr_num, (long)intr_prio);
-#endif
-}
-
-static void espradio_clear_intr(uint32_t intr_source, uint32_t intr_num) {
-    (void)intr_num;
-    intr_matrix_set(0, intr_source, 0);
-#if ESPRADIO_OSI_DEBUG
-    printf("osi: clear_intr src=%lu num=%lu\n",
-           (unsigned long)intr_source, (unsigned long)intr_num);
-#endif
-}
-
-static void espradio_set_isr(int32_t n, void *f, void *arg) {
-    if (n >= 0 && f != NULL) {
-        ets_isr_attach((uint32_t)n, (void (*)(void *))f, arg);
-    }
-#if ESPRADIO_OSI_DEBUG
-    printf("osi: set_isr n=%ld f=%p arg=%p\n", (long)n, f, arg);
-#endif
-}
-
-static void espradio_ints_on(uint32_t mask) {
-    ets_isr_unmask(mask);
-#if ESPRADIO_OSI_DEBUG
-    printf("osi: ints_on mask=0x%08lx\n", (unsigned long)mask);
-#endif
-}
-
-static void espradio_ints_off(uint32_t mask) {
-    ets_isr_mask(mask);
-#if ESPRADIO_OSI_DEBUG
-    printf("osi: ints_off mask=0x%08lx\n", (unsigned long)mask);
-#endif
-}
-
-static bool espradio_is_from_isr(void) {
-    return false;
-}
+/* ISR functions — defined in isr.c */
+void espradio_set_intr(int32_t cpu_no, uint32_t intr_source, uint32_t intr_num, int32_t intr_prio);
+void espradio_clear_intr(uint32_t intr_source, uint32_t intr_num);
+void espradio_set_isr(int32_t n, void *f, void *arg);
+void espradio_call_saved_isr(int32_t n);
+bool espradio_is_from_isr(void);
+void espradio_ints_on(uint32_t mask);
+void espradio_ints_off(uint32_t mask);
+void espradio_task_yield_from_isr(void);
+int32_t espradio_queue_send_from_isr(void *queue, void *item, void *hptw);
 
 void *espradio_spin_lock_create(void);
 void espradio_yield_and_fire_pending_timers(void);
@@ -176,10 +139,6 @@ void espradio_spin_lock_delete(void *lock);
 uint32_t espradio_wifi_int_disable(void *wifi_int_mux);
 
 void espradio_wifi_int_restore(void *wifi_int_mux, uint32_t tmp);
-
-static void espradio_task_yield_from_isr(void) {
-    espradio_task_yield_go();
-}
 
 void *espradio_semphr_create(uint32_t max, uint32_t init);
 
@@ -212,13 +171,6 @@ static void espradio_queue_delete(void *queue) {
 }
 
 int32_t espradio_queue_send(void *queue, void *item, uint32_t block_time_tick);
-
-static int32_t espradio_queue_send_from_isr(void *queue, void *item, void *hptw) {
-    if (hptw) {
-        *(uint32_t *)hptw = 1;
-    }
-    return espradio_queue_send(queue, item, 0);
-}
 
 static int32_t espradio_queue_send_to_back(void *queue, void *item, uint32_t block_time_tick) {
     return espradio_queue_send(queue, item, block_time_tick);
@@ -309,12 +261,17 @@ static int32_t espradio_task_get_max_priority(void) {
 static unsigned espradio_alloc_count;
 static unsigned espradio_free_count;
 
+void *espradio_arena_alloc(size_t size);
+void *espradio_arena_calloc(size_t n, size_t size);
+void *espradio_arena_realloc(void *ptr, size_t new_size);
+void  espradio_arena_free(void *p);
+
 static void *espradio_malloc(size_t size) {
 #if ESPRADIO_OSI_DEBUG
     printf("osi: malloc %zu\n", size);
 #endif
     espradio_alloc_count++;
-    return malloc(size);
+    return espradio_arena_alloc(size);
 }
 
 static void espradio_free(void *p) {
@@ -322,7 +279,7 @@ static void espradio_free(void *p) {
     printf("osi: free %p\n", (void *)p);
 #endif
     if (p) espradio_free_count++;
-    free(p);
+    espradio_arena_free(p);
 }
 
 /* Minimal esp_event implementation: queue events, dispatch from run_once (called from Go).
@@ -368,7 +325,7 @@ static void event_unlock(void) {
 static char *dup_str(const char *s) {
     if (!s) return NULL;
     size_t n = strlen(s) + 1;
-    char *p = (char *)malloc(n);
+    char *p = (char *)espradio_arena_alloc(n);
     if (p) memcpy(p, s, n);
     return p;
 }
@@ -386,22 +343,22 @@ esp_err_t esp_event_loop_delete_default(void) {
         event_item_t *e = s_event_head;
         s_event_head = e->next;
         if (e->base != s_wifi_event_base)
-            free(e->base);
-        free(e->data);
-        free(e);
+            espradio_arena_free(e->base);
+        espradio_arena_free(e->data);
+        espradio_arena_free(e);
     }
     s_event_tail = NULL;
     while (s_handler_head) {
         event_handler_t *h = s_handler_head;
         s_handler_head = h->next;
-        free(h);
+        espradio_arena_free(h);
     }
     event_unlock();
     return 0;
 }
 esp_err_t esp_event_handler_register(esp_event_base_t event_base, int32_t event_id,
                                      esp_event_handler_t event_handler, void *event_handler_arg) {
-    event_handler_t *h = (event_handler_t *)malloc(sizeof(*h));
+    event_handler_t *h = (event_handler_t *)espradio_arena_alloc(sizeof(*h));
     if (!h) return -1;
     h->base = event_base;
     h->id = event_id;
@@ -447,9 +404,9 @@ void espradio_event_loop_run_once(void) {
             h->handler(h->arg, (esp_event_base_t)base, e->id, e->data);
     }
     if (e->base != s_wifi_event_base)
-        free(e->base);
-    free(e->data);
-    free(e);
+        espradio_arena_free(e->base);
+    espradio_arena_free(e->data);
+    espradio_arena_free(e);
 }
 
 static void espradio_dummy_event_cb(void *arg, esp_event_base_t base, int32_t id, void *data) {
@@ -508,7 +465,7 @@ static int32_t espradio_event_post(const char* event_base, int32_t event_id, voi
     }
 #endif
     if (!s_event_loop_ready) return 0;
-    event_item_t *e = (event_item_t *)malloc(sizeof(*e));
+    event_item_t *e = (event_item_t *)espradio_arena_alloc(sizeof(*e));
     if (!e) return -1;
     if (event_base && strcmp(event_base, s_wifi_event_base) == 0)
         e->base = (char *)s_wifi_event_base;
@@ -518,7 +475,7 @@ static int32_t espradio_event_post(const char* event_base, int32_t event_id, voi
     e->data_size = event_data_size;
     e->data = NULL;
     if (event_data_size > 0 && event_data) {
-        e->data = malloc(event_data_size);
+        e->data = espradio_arena_alloc(event_data_size);
         if (e->data) memcpy(e->data, event_data, event_data_size);
     }
     e->next = NULL;
@@ -1161,21 +1118,22 @@ uint32_t espradio_log_timestamp(void);
 
 static void * espradio_malloc_internal(size_t size) {
     espradio_alloc_count++;
-    return malloc(size);
+    return espradio_arena_alloc(size);
 }
 
 static void * espradio_realloc_internal(void *ptr, size_t size) {
-    espradio_panic("todo: _realloc_internal");
+    espradio_alloc_count++;
+    return espradio_arena_realloc(ptr, size);
 }
 
 static void * espradio_calloc_internal(size_t n, size_t size) {
     espradio_alloc_count++;
-    return calloc(n, size);
+    return espradio_arena_calloc(n, size);
 }
 
 static void * espradio_zalloc_internal(size_t size) {
     espradio_alloc_count++;
-    return calloc(1, size);
+    return espradio_arena_calloc(1, size);
 }
 
 static void * espradio_wifi_malloc(size_t size) {
@@ -1184,24 +1142,15 @@ static void * espradio_wifi_malloc(size_t size) {
 #if ESPRADIO_OSI_DEBUG
     printf("osi: wifi_malloc %zu stack_left=%lu\n", size, (unsigned long)espradio_stack_remaining());
 #endif
-    return malloc(size);
+    return espradio_arena_alloc(size);
 }
 
 static void * espradio_wifi_realloc(void *ptr, size_t size) {
 #if ESPRADIO_OSI_DEBUG
     printf("osi: wifi_realloc %p %zu\n", (void *)ptr, size);
 #endif
-    if (ptr == NULL || (uintptr_t)ptr < 0x1000) {
-        espradio_alloc_count++;
-        return malloc(size);
-    }
     espradio_alloc_count++;
-    void *n = malloc(size);
-    if (n == NULL) return NULL;
-    memcpy(n, ptr, size);
-    espradio_free_count++;
-    free(ptr);
-    return n;
+    return espradio_arena_realloc(ptr, size);
 }
 
 static void * espradio_wifi_calloc(size_t n, size_t size) {
@@ -1209,7 +1158,7 @@ static void * espradio_wifi_calloc(size_t n, size_t size) {
     printf("osi: wifi_calloc n=%zu size=%zu\n", n, size);
 #endif
     espradio_alloc_count++;
-    return calloc(n, size);
+    return espradio_arena_calloc(n, size);
 }
 
 static void * espradio_wifi_zalloc(size_t size) {
@@ -1217,22 +1166,26 @@ static void * espradio_wifi_zalloc(size_t size) {
     printf("osi: wifi_zalloc %zu\n", size);
 #endif
     espradio_alloc_count++;
-    return calloc(1, size);
+    return espradio_arena_calloc(1, size);
 }
+
+void espradio_arena_stats(uint32_t *used, uint32_t *capacity);
 
 void espradio_alloc_stats(unsigned *out_alloc, unsigned *out_free) {
     if (out_alloc) *out_alloc = espradio_alloc_count;
     if (out_free) *out_free = espradio_free_count;
+    uint32_t used, cap;
+    espradio_arena_stats(&used, &cap);
+    printf("osi: arena %lu / %lu bytes\n", (unsigned long)used, (unsigned long)cap);
 }
 
-/* FreeRTOS heap: blob may call these for task/queue; route to same heap and count */
 void *pvPortMalloc(size_t size) {
     espradio_alloc_count++;
-    return malloc(size);
+    return espradio_arena_alloc(size);
 }
 void vPortFree(void *p) {
     if (p) espradio_free_count++;
-    free(p);
+    espradio_arena_free(p);
 }
 
 void * espradio_wifi_create_queue(int queue_len, int item_size);

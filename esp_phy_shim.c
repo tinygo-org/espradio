@@ -13,7 +13,7 @@
 #endif
 
 #ifndef ESPRADIO_PHY_USE_PROBE
-#define ESPRADIO_PHY_USE_PROBE 1
+#define ESPRADIO_PHY_USE_PROBE 0
 #endif
 
 #ifndef ESPRADIO_PHY_DEBUG
@@ -175,7 +175,8 @@ void esp_phy_load_cal_and_init(void) {
         printf("espradio: esp_phy_get_init_data returned NULL\n");
         return;
     }
-    esp_phy_calibration_data_t *cal_data = (esp_phy_calibration_data_t *)calloc(1, sizeof(esp_phy_calibration_data_t));
+    void *espradio_arena_calloc(size_t, size_t);
+    esp_phy_calibration_data_t *cal_data = (esp_phy_calibration_data_t *)espradio_arena_calloc(1, sizeof(esp_phy_calibration_data_t));
     if (cal_data == NULL) {
         printf("espradio: calloc cal_data failed, using static\n");
         cal_data = &s_phy_cal_data;
@@ -219,7 +220,8 @@ void esp_phy_load_cal_and_init(void) {
     if (esp_deep_sleep_register_phy_hook(phy_close_rf) == ESP_OK &&
         esp_deep_sleep_register_phy_hook(phy_xpd_tsens) == ESP_OK &&
         cal_data != &s_phy_cal_data) {
-        free(cal_data);
+        void espradio_arena_free(void *);
+        espradio_arena_free(cal_data);
     }
 }
 
@@ -341,7 +343,8 @@ void esp_phy_modem_deinit(void) {
     if (prev_ref == 1u) {
         s_phy_is_digital_regs_stored_local = 0u;
         if (s_phy_digital_regs_mem_ptr != NULL) {
-            free(s_phy_digital_regs_mem_ptr);
+            void espradio_arena_free(void *);
+            espradio_arena_free(s_phy_digital_regs_mem_ptr);
         }
         s_phy_digital_regs_mem_ptr = NULL;
         phy_init_flag();

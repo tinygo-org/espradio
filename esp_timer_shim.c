@@ -25,7 +25,8 @@ __attribute__((weak)) esp_err_t esp_timer_create(const esp_timer_create_args_t *
     if ((create_args == NULL) || (out_handle == NULL) || (create_args->callback == NULL)) {
         return ESP_ERR_INVALID_ARG;
     }
-    struct esp_timer *t = (struct esp_timer *)malloc(sizeof(struct esp_timer));
+    void *espradio_arena_alloc(size_t);
+    struct esp_timer *t = (struct esp_timer *)espradio_arena_alloc(sizeof(struct esp_timer));
     if (t == NULL) {
         return ESP_ERR_NO_MEM;
     }
@@ -103,7 +104,8 @@ __attribute__((weak)) esp_err_t esp_timer_delete(esp_timer_handle_t timer) {
         }
         pp = &(*pp)->next;
     }
-    free(t);
+    void espradio_arena_free(void *);
+    espradio_arena_free(t);
     return ESP_OK;
 }
 
