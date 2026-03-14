@@ -1,0 +1,6 @@
+[submodule "esp-hal"]
+	path = esp-hal
+	url = https://github.com/esp-rs/esp-hal
+[submodule "esp-wifi"]
+	path = esp-wifi
+	url = https://github.com/esp-rs/esp-wifi
