@@ -29,12 +29,9 @@
 
 MEMORY
 {
-    /* Match ESP-IDF esp32c3 memory.ld.in so prebuilt WiFi blobs and memprot agree on boundaries.
-     * I_D_SRAM_SIZE = 0x4E710 (SRAM_DRAM_END 0x3FCCE710 - SRAM_DRAM_ORG 0x3FC80000).
-     */
-    DRAM (rw) : ORIGIN = 0x3FC80000, LENGTH = 0x4E710
-    IRAM (x)  : ORIGIN = 0x40380000, LENGTH = 0x4E710
-    /* 0x3FCCE710..0x3FCDE710 reserved for WiFi/ROM; no segments placed there */
+    /* Note: DRAM and IRAM below are actually in the same 384K address space. */
+    DRAM (rw) : ORIGIN = 0x3FC80000, LENGTH = 384K /* Internal SRAM 1 (data bus) */
+    IRAM (x)  : ORIGIN = 0x40380000, LENGTH = 384K /* Internal SRAM 1 (instruction bus) */
 
     /* Note: DROM and IROM below are actually in the same 8M address space. */
     DROM (r)  : ORIGIN = 0x3C000000, LENGTH = 8M /* Data bus (read-only) */
@@ -64,11 +61,6 @@ SECTIONS
         *(.rodata*)
         . = ALIGN (4);
     } >DROM
-
-    /* Region 0x3FCCE710..0x3FCDE710 is reserved for WiFi/ROM; no app sections
-     * are placed here (heap ends at 0x3FCCE710). Placing segments here breaks
-     * the boot image (SHA-256, segment order). WiFi lib data stays in DRAM.
-     */
 
     /* Put the stack at the bottom of DRAM, so that the application will
      * crash on stack overflow instead of silently corrupting memory.
@@ -2079,7 +2071,7 @@ coex_core_pti_get = 0x400018c0;
 coex_core_release = 0x400018c4;
 coex_core_request = 0x400018c8;
 coex_core_status_get = 0x400018cc;
-/*coex_core_timer_idx_get = 0x400018d0;*/
+coex_core_timer_idx_get = 0x400018d0;
 coex_event_duration_get = 0x400018d4;
 coex_hw_timer_disable = 0x400018d8;
 coex_hw_timer_enable = 0x400018dc;

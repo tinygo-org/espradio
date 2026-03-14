@@ -426,7 +426,7 @@ void espradio_event_register_default_cb(void) {
  * Queue event and return 0 so driver does not take the error path.
  * Вызывается из wifi task, в т.ч. для HOME_CHANNEL_CHANGE (41/43).
  *************************************************************************/
-static int32_t espradio_event_post(const char* event_base, int32_t event_id, void* event_data, size_t event_data_size, uint32_t ticks_to_wait) {
+int32_t espradio_event_post(const char* event_base, int32_t event_id, void* event_data, size_t event_data_size, uint32_t ticks_to_wait) {
     (void)ticks_to_wait;
 #if ESPRADIO_OSI_DEBUG
     printf("CCHK: event_post called\n");

@@ -135,6 +135,7 @@ func Scan() ([]AccessPoint, error) {
 		println("wifi_scan: esp_wifi_scan_get_ap_records err", int32(code))
 		return nil, makeError(code)
 	}
+	println("wifi_scan: get_ap_records returned num=", int(num))
 
 	aps := make([]AccessPoint, int(num))
 	for i := 0; i < int(num); i++ {

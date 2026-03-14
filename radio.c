@@ -153,6 +153,9 @@ esp_err_t espradio_wifi_init(void) {
     if (ret == 0) {
         extern void esp_phy_modem_init(void);
         esp_phy_modem_init();
+
+        extern void espradio_wpa_register(void);
+        espradio_wpa_register();
     }
     return ret;
 }
@@ -161,7 +164,6 @@ void espradio_wifi_init_completed(void) {
     wifi_init_completed();
     printf("espradio: wifi_init_completed\n");
 }
-
 
 /* Minimal symbol expected by blobs (wifi_event_post in libnet80211.a).
  * In IDF this is ESP_EVENT_DECLARE_BASE(WIFI_EVENT), i.e. extern esp_event_base_t const WIFI_EVENT;
