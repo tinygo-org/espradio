@@ -259,16 +259,6 @@ static int32_t espradio_task_create(void *task_func, const char *name, uint32_t 
     return espradio_task_create_pinned_to_core(task_func, name, stack_depth, param, prio, task_handle, 0);
 }
 
-static int32_t espradio_task_create_pinned_to_core_wrap(void *task_func, const char *name, uint32_t stack_depth, void *param, uint32_t prio, void *task_handle, uint32_t core_id) {
-#if ESPRADIO_OSI_DEBUG
-    printf("osi: task_create_pinned name=%s fn=%p stack=%lu prio=%lu core=%lu param=%p\n",
-           name ? name : "(null)", task_func, (unsigned long)stack_depth, (unsigned long)prio, (unsigned long)core_id, param);
-    printf("CCHK: task_create_pinned called\n");
-    fflush(stdout);
-#endif
-    return espradio_task_create_pinned_to_core(task_func, name, stack_depth, param, prio, task_handle, core_id);
-}
-
 void espradio_task_delete(void *task_handle);
 
 void espradio_task_delay(uint32_t tick);
@@ -932,41 +922,6 @@ int espradio_timer_poll_due(int max_fire) {
     return fired;
 }
 
-static void timer_setfn_wrapper(void *ptimer, void *pfunction, void *parg) {
-#if ESPRADIO_OSI_DEBUG
-    printf("osi: timer_setfn_wrapper ptimer=%p fn=%p arg=%p\n", ptimer, pfunction, parg);
-#endif
-    espradio_timer_setfn(ptimer, pfunction, parg);
-}
-
-static void timer_arm_wrapper(void *ptimer, uint32_t tmout, bool repeat) {
-#if ESPRADIO_OSI_DEBUG
-    printf("osi: timer_arm_wrapper ptimer=%p tmout=%lu repeat=%d\n", ptimer, (unsigned long)tmout, (int)repeat);
-#endif
-    espradio_timer_arm(ptimer, tmout, repeat);
-}
-
-static void timer_arm_us_wrapper(void *ptimer, uint32_t us, bool repeat) {
-#if ESPRADIO_OSI_DEBUG
-    printf("osi: timer_arm_us_wrapper ptimer=%p us=%lu repeat=%d\n", ptimer, (unsigned long)us, (int)repeat);
-#endif
-    espradio_timer_arm_us(ptimer, us, repeat);
-}
-
-static void timer_disarm_wrapper(void *ptimer) {
-#if ESPRADIO_OSI_DEBUG
-    printf("osi: timer_disarm_wrapper ptimer=%p\n", ptimer);
-#endif
-    espradio_timer_disarm(ptimer);
-}
-
-static void timer_done_wrapper(void *ptimer) {
-#if ESPRADIO_OSI_DEBUG
-    printf("osi: timer_done_wrapper ptimer=%p\n", ptimer);
-#endif
-    espradio_timer_done(ptimer);
-}
-
 /* Stub: reset WiFi MAC. Блоб вызывает по osi+244 между coex_wifi_request и coex_wifi_release;
  * выставляем g_wdev_last_desc_reset_ptr чтобы следующий за release *ptr=1 не портил память. */
 static void espradio_wifi_reset_mac(void) {
@@ -974,28 +929,6 @@ static void espradio_wifi_reset_mac(void) {
     espradio_hal_reset_wifi_mac_go();
 #if ESPRADIO_OSI_DEBUG
     printf("osi: wifi_reset_mac\n");
-#endif
-}
-
-static void espradio_wifi_clock_enable(void) {
-    espradio_hal_init_clocks_go();
-}
-
-static void espradio_wifi_clock_disable(void) {
-    espradio_hal_disable_clocks_go();
-}
-
-static void espradio_wifi_rtc_enable_iso(void) {
-    espradio_hal_wifi_rtc_enable_iso_go();
-#if ESPRADIO_OSI_DEBUG
-    printf("osi: wifi_rtc_enable_iso\n");
-#endif
-}
-
-static void espradio_wifi_rtc_disable_iso(void) {
-    espradio_hal_wifi_rtc_disable_iso_go();
-#if ESPRADIO_OSI_DEBUG
-    printf("osi: wifi_rtc_disable_iso\n");
 #endif
 }
 
@@ -1450,7 +1383,7 @@ wifi_osi_funcs_t espradio_osi_funcs = {
     ._event_group_set_bits = espradio_event_group_set_bits,
     ._event_group_clear_bits = espradio_event_group_clear_bits,
     ._event_group_wait_bits = espradio_event_group_wait_bits,
-    ._task_create_pinned_to_core = espradio_task_create_pinned_to_core_wrap,
+    ._task_create_pinned_to_core = espradio_task_create_pinned_to_core,
     ._task_create = espradio_task_create,
     ._task_delete = espradio_task_delete,
     ._task_delay = espradio_task_delay,
@@ -1470,16 +1403,16 @@ wifi_osi_funcs_t espradio_osi_funcs = {
     ._phy_enable = espradio_phy_enable,
     ._phy_update_country_info = espradio_phy_update_country_info,
     ._read_mac = espradio_read_mac,
-    ._timer_arm = timer_arm_wrapper,
-    ._timer_disarm = timer_disarm_wrapper,
-    ._timer_done = timer_done_wrapper,
-    ._timer_setfn = timer_setfn_wrapper,
-    ._timer_arm_us = timer_arm_us_wrapper,
+    ._timer_arm = espradio_timer_arm,
+    ._timer_disarm = espradio_timer_disarm,
+    ._timer_done = espradio_timer_done,
+    ._timer_setfn = espradio_timer_setfn,
+    ._timer_arm_us = espradio_timer_arm_us,
     ._wifi_reset_mac = espradio_wifi_reset_mac,
-    ._wifi_clock_enable = espradio_wifi_clock_enable,
-    ._wifi_clock_disable = espradio_wifi_clock_disable,
-    ._wifi_rtc_enable_iso = espradio_wifi_rtc_enable_iso,
-    ._wifi_rtc_disable_iso = espradio_wifi_rtc_disable_iso,
+    ._wifi_clock_enable = espradio_hal_init_clocks_go,
+    ._wifi_clock_disable = espradio_hal_disable_clocks_go,
+    ._wifi_rtc_enable_iso = espradio_hal_wifi_rtc_enable_iso_go,
+    ._wifi_rtc_disable_iso = espradio_hal_wifi_rtc_disable_iso_go,
     ._esp_timer_get_time = espradio_esp_timer_get_time,
     ._nvs_set_i8 = espradio_nvs_set_i8,
     ._nvs_get_i8 = espradio_nvs_get_i8,
