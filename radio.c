@@ -40,7 +40,6 @@ extern char gChmCxt[252];               /* libnet80211.a: channel manager contex
 extern void phy_get_romfunc_addr(void);
 extern void *g_phyFuns;
 extern wifi_osi_funcs_t *g_osi_funcs_p;
-extern void espradio_phy_patch_romfuncs(void);
 extern int rtc_get_reset_reason(int cpu_no);
 
 /* Stub for the WIFI_INIT_CONFIG_DEFAULT() macro; we actually use espradio_osi_funcs below */
@@ -122,10 +121,6 @@ esp_err_t espradio_wifi_init(void) {
               rtc_get_reset_reason(0), rtc_get_reset_reason(1));
     phy_get_romfunc_addr();
     RADIO_DBG("espradio: phy_get_romfunc_addr g_phyFuns=%p\n", g_phyFuns);
-#if ESPRADIO_PHY_PATCH_ROMFUNCS
-    espradio_phy_patch_romfuncs();
-#endif
-
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     cfg.osi_funcs = &espradio_osi_funcs;
     cfg.nvs_enable = 0;

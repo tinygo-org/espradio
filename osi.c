@@ -1,34 +1,20 @@
-#include "include.h"
 #include "esp_coexist_internal.h"
 #include "rom.h"
+#include "espradio.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdint.h>
 
 /* Set to 1 to enable OSI callback logs (e.g. CGO_CFLAGS=-DESPRADIO_OSI_DEBUG=1). */
 #ifndef ESPRADIO_OSI_DEBUG
 #define ESPRADIO_OSI_DEBUG 0
 #endif
 
-#include <stdint.h>
-
 #define ESPRADIO_PHY_MODEM_WIFI 1u
 
-__attribute__((noreturn))
-void espradio_panic(char *s);
-extern uint64_t espradio_time_us_now(void);
-extern void esp_phy_enable(uint32_t modem);
-extern void esp_phy_disable(uint32_t modem);
-extern int esp_phy_update_country_info(const char *country) __attribute__((weak));
-extern void phy_wifi_enable_set(uint8_t enable);
-extern void espradio_hal_init_clocks_go(void);
-extern void espradio_hal_disable_clocks_go(void);
-extern void espradio_hal_wifi_rtc_enable_iso_go(void);
-extern void espradio_hal_wifi_rtc_disable_iso_go(void);
-extern void espradio_hal_reset_wifi_mac_go(void);
-extern int espradio_hal_read_mac_go(uint8_t *mac, unsigned int iftype);
-
 extern wifi_osi_funcs_t espradio_osi_funcs;
+extern int coex_pti_get(uint32_t event, uint8_t *pti);
 static void espradio_wifi_reset_mac(void);
 void espradio_timer_pending_reset(void);
 
@@ -519,10 +505,6 @@ static void espradio_phy_enable(void) {
 
 static int espradio_phy_update_country_info(const char* country) {
     static char s_country[4];
-    int rc = 0;
-    if (esp_phy_update_country_info) {
-        rc = esp_phy_update_country_info(country);
-    }
     if (country) {
         s_country[0] = country[0];
         s_country[1] = country[1];
@@ -535,10 +517,10 @@ static int espradio_phy_update_country_info(const char* country) {
         s_country[3] = 0;
     }
 #if ESPRADIO_OSI_DEBUG
-    printf("osi: phy_update_country_info country=%p iso=%s rc=%d\n",
-           (void *)country, s_country, rc);
+    printf("osi: phy_update_country_info country=%p iso=%s\n",
+           (void *)country, s_country);
 #endif
-    return rc;
+    return 0;
 }
 
 /* Stub: returns a zero MAC; production should read from eFuse. */

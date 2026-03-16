@@ -119,11 +119,7 @@ extern void espradio_hal_init_clocks_go(void);
 extern void espradio_hal_disable_clocks_go(void);
 extern int rtc_get_reset_reason(int cpu_no);
 extern int espradio_hal_read_mac_go(unsigned char *mac, unsigned int iftype);
-extern void espradio_phy_hook_trace_set(unsigned int enabled);
 extern void espradio_pll_trace_set_enabled(unsigned int enabled);
-extern int espradio_register_chipv7_phy_probe(const esp_phy_init_data_t *init_data,
-                                              esp_phy_calibration_data_t *cal_data,
-                                              esp_phy_calibration_mode_t cal_mode);
 
 static uint8_t s_is_phy_calibrated;
 static uint8_t s_phy_modem_init_ref;
@@ -211,14 +207,9 @@ void esp_phy_load_cal_and_init(void) {
                  (unsigned)cal_data->mac[4], (unsigned)cal_data->mac[5],
                  (int)nvs_rc, (unsigned)cal_mode);
     espradio_phy_debug_dump(init_data, cal_data, cal_mode);
-    /* Keep trace off during rf_init; probe enables it right before bb_init. */
-    espradio_phy_hook_trace_set(0u);
+    /* Keep trace off during rf_init; probe used to toggle it before bb_init. */
     espradio_pll_trace_set_enabled(0u);
-#if ESPRADIO_PHY_USE_PROBE
-    int rc = espradio_register_chipv7_phy_probe(init_data, cal_data, cal_mode);
-#else
     int rc = espradio_register_chipv7_phy_logged(init_data, cal_data, cal_mode);
-#endif
     PHY_SHIM_DBG("espradio: register_chipv7_phy rc=%d\n", rc);
     if (cal_mode != PHY_RF_CAL_NONE && (nvs_rc != ESP_OK || rc == 1)) {
         esp_phy_store_cal_data_to_nvs(cal_data);

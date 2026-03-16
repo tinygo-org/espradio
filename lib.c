@@ -1,8 +1,3 @@
-/*
- * Functions not provided by TinyGo/picolibc runtime but required
- * by the WiFi blob and libwpa_supplicant.a dependency chain.
- */
-
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
