@@ -64,6 +64,5 @@ extern int espradio_hal_read_mac_go(unsigned char *mac, unsigned int iftype);
 extern void espradio_on_wifi_event(int32_t eventID, void *data);
 
 /* ===== esp32c3/ → линкер (реализованы в esp32c3/\*.c) ===== */
-extern void espradio_pll_trace_set_enabled(uint32_t enabled);
 extern void esp_phy_enable(uint32_t modem);
 extern void esp_phy_disable(uint32_t modem);
