@@ -2,12 +2,10 @@ package espradio
 
 /*
 #cgo CFLAGS: -Iblobs/include
-#cgo CFLAGS: -Iblobs/include/esp32c3
 #cgo CFLAGS: -Iblobs/include/local
 #cgo CFLAGS: -Iblobs/headers
 #cgo CFLAGS: -DCONFIG_SOC_WIFI_NAN_SUPPORT=0
 #cgo CFLAGS: -DESPRADIO_PHY_PATCH_ROMFUNCS=0
-#cgo LDFLAGS: -Lblobs/libs/esp32c3 -lcoexist -lcore -lmesh -lnet80211 -lespnow -lregulatory -lphy -lpp -lwpa_supplicant
 
 #include "espradio.h"
 */
@@ -17,6 +15,7 @@ import (
 	"runtime"
 	"runtime/interrupt"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 )
@@ -546,6 +545,475 @@ func espradio_wifi_int_restore(wifi_int_mux unsafe.Pointer, tmp uint32) {
 }
 
 var wifiISR interrupt.Interrupt
+
+// ─── OSI sync primitives ───────────────────────────────────────────────────────
+
+const debugOSI = false
+
+var fakeSpinLock uint8
+
+//export espradio_spin_lock_create
+func espradio_spin_lock_create() unsafe.Pointer {
+	return unsafe.Pointer(&fakeSpinLock)
+}
+
+//export espradio_spin_lock_delete
+func espradio_spin_lock_delete(lock unsafe.Pointer) {
+}
+
+type recursiveMutex struct {
+	state sync.Mutex
+	owner unsafe.Pointer
+	count uint32
+}
+
+var mutexes [8]recursiveMutex
+var mutexInUse [8]uint32
+
+//export espradio_recursive_mutex_create
+func espradio_recursive_mutex_create() unsafe.Pointer {
+	for i := range mutexes {
+		if atomic.CompareAndSwapUint32(&mutexInUse[i], 0, 1) {
+			return unsafe.Pointer(&mutexes[i])
+		}
+	}
+	panic("espradio: too many mutexes")
+}
+
+//export espradio_mutex_delete
+func espradio_mutex_delete(cmut unsafe.Pointer) {
+	mut := (*recursiveMutex)(cmut)
+	mut.state.Lock()
+	mut.owner = nil
+	mut.count = 0
+	mut.state.Unlock()
+	for i := range mutexes {
+		if mut == &mutexes[i] {
+			atomic.StoreUint32(&mutexInUse[i], 0)
+			return
+		}
+	}
+}
+
+//export espradio_mutex_lock
+func espradio_mutex_lock(cmut unsafe.Pointer) int32 {
+	mut := (*recursiveMutex)(cmut)
+	me := tinygo_task_current()
+	for {
+		mut.state.Lock()
+		if mut.count == 0 || mut.owner == me {
+			mut.owner = me
+			mut.count++
+			mut.state.Unlock()
+			return 1
+		}
+		mut.state.Unlock()
+		safeGosched()
+	}
+}
+
+//export espradio_mutex_unlock
+func espradio_mutex_unlock(cmut unsafe.Pointer) int32 {
+	mut := (*recursiveMutex)(cmut)
+	me := tinygo_task_current()
+	mut.state.Lock()
+	if mut.count > 0 && mut.owner == me {
+		mut.count--
+		if mut.count == 0 {
+			mut.owner = nil
+		}
+		mut.state.Unlock()
+		return 1
+	}
+	mut.state.Unlock()
+	return 0
+}
+
+// ─── Event groups ─────────────────────────────────────────────────────────────
+
+type eventGroup struct {
+	mu   sync.Mutex
+	bits uint32
+}
+
+func newEventGroup() *eventGroup {
+	return &eventGroup{}
+}
+
+//export espradio_event_group_create
+func espradio_event_group_create() unsafe.Pointer {
+	eg := newEventGroup()
+	return unsafe.Pointer(eg)
+}
+
+//export espradio_event_group_delete
+func espradio_event_group_delete(ptr unsafe.Pointer) {
+	eg := (*eventGroup)(ptr)
+	eg.mu.Lock()
+	eg.bits = 0
+	eg.mu.Unlock()
+}
+
+//export espradio_event_group_set_bits
+func espradio_event_group_set_bits(ptr unsafe.Pointer, bits uint32) uint32 {
+	eg := (*eventGroup)(ptr)
+	eg.mu.Lock()
+	eg.bits |= bits
+	cur := eg.bits
+	eg.mu.Unlock()
+	return cur
+}
+
+//export espradio_event_group_clear_bits
+func espradio_event_group_clear_bits(ptr unsafe.Pointer, bits uint32) uint32 {
+	eg := (*eventGroup)(ptr)
+	eg.mu.Lock()
+	eg.bits &^= bits
+	cur := eg.bits
+	eg.mu.Unlock()
+	return cur
+}
+
+//export espradio_event_group_wait_bits
+func espradio_event_group_wait_bits(ptr unsafe.Pointer, bitsToWaitFor uint32, clearOnExit int32, waitForAllBits int32, blockTimeTick uint32) uint32 {
+	eg := (*eventGroup)(ptr)
+	want := bitsToWaitFor
+
+	matches := func(bits uint32) bool {
+		if waitForAllBits != 0 {
+			return bits&want == want
+		}
+		return bits&want != 0
+	}
+
+	forever := blockTimeTick == C.OSI_FUNCS_TIME_BLOCKING
+	start := time.Now()
+	var timeout time.Duration
+	if !forever {
+		timeout = time.Duration(blockTimeTick) * time.Millisecond
+	}
+
+	var snapshot uint32
+	for {
+		eg.mu.Lock()
+		snapshot = eg.bits
+		ok := matches(snapshot)
+		if ok {
+			if clearOnExit != 0 {
+				eg.bits &^= want
+			}
+			eg.mu.Unlock()
+			return snapshot
+		}
+		eg.mu.Unlock()
+		if blockTimeTick == 0 || (!forever && time.Since(start) >= timeout) {
+			return snapshot
+		}
+		safeGosched()
+	}
+}
+
+// ─── Semaphores ────────────────────────────────────────────────────────────────
+
+type semaphore struct {
+	count uint32
+}
+
+var (
+	semaphores      [4]semaphore
+	semaphoreIndex  uint32
+	wifiThreadSemMu sync.Mutex
+	wifiThreadSemByTH = map[unsafe.Pointer]*semaphore{}
+	wifiThreadSemNil  semaphore
+)
+
+func wifiThreadSemOwner(semphr unsafe.Pointer) unsafe.Pointer {
+	wifiThreadSemMu.Lock()
+	defer wifiThreadSemMu.Unlock()
+	for th, sem := range wifiThreadSemByTH {
+		if unsafe.Pointer(sem) == semphr {
+			return th
+		}
+	}
+	return nil
+}
+
+func semTryTake(sem *semaphore) bool {
+	for {
+		cur := atomic.LoadUint32(&sem.count)
+		if cur == 0 {
+			return false
+		}
+		if atomic.CompareAndSwapUint32(&sem.count, cur, cur-1) {
+			return true
+		}
+	}
+}
+
+//export espradio_semphr_create
+func espradio_semphr_create(max, init uint32) unsafe.Pointer {
+	i := atomic.AddUint32(&semaphoreIndex, 1) - 1
+	if i >= uint32(len(semaphores)) {
+		panic("espradio: too many semaphores")
+	}
+	semaphores[i] = semaphore{count: init}
+	return unsafe.Pointer(&semaphores[i])
+}
+
+//export espradio_semphr_take
+func espradio_semphr_take(semphr unsafe.Pointer, block_time_tick uint32) int32 {
+	sem := (*semaphore)(semphr)
+	owner := wifiThreadSemOwner(semphr)
+	_ = owner
+	if block_time_tick == 0 {
+		if semTryTake(sem) {
+			return 1
+		}
+		return 0
+	}
+
+	forever := block_time_tick == C.OSI_FUNCS_TIME_BLOCKING
+	start := time.Now()
+	var timeout time.Duration
+	if !forever {
+		timeout = time.Duration(block_time_tick) * time.Millisecond
+	}
+
+	for {
+		if semTryTake(sem) {
+			return 1
+		}
+		if !forever && time.Since(start) >= timeout {
+			return 0
+		}
+		safeGosched()
+	}
+}
+
+//export espradio_semphr_give
+func espradio_semphr_give(semphr unsafe.Pointer) int32 {
+	sem := (*semaphore)(semphr)
+	atomic.AddUint32(&sem.count, 1)
+	return 1
+}
+
+//export espradio_semphr_delete
+func espradio_semphr_delete(semphr unsafe.Pointer) {
+	sem := (*semaphore)(semphr)
+	atomic.StoreUint32(&sem.count, 0)
+}
+
+//export espradio_wifi_thread_semphr_get
+func espradio_wifi_thread_semphr_get() unsafe.Pointer {
+	task := tinygo_task_current()
+	wifiThreadSemMu.Lock()
+	defer wifiThreadSemMu.Unlock()
+	if task == nil {
+		return unsafe.Pointer(&wifiThreadSemNil)
+	}
+	sem := wifiThreadSemByTH[task]
+	if sem == nil {
+		sem = &semaphore{}
+		wifiThreadSemByTH[task] = sem
+	}
+	return unsafe.Pointer(sem)
+}
+
+// ─── Queues ────────────────────────────────────────────────────────────────────
+
+type queue struct {
+	mu      sync.Mutex
+	storage [][8]byte
+	read    int
+	write   int
+	count   int
+}
+
+func newQueue(capacity int) *queue {
+	return &queue{
+		storage: make([][8]byte, capacity),
+	}
+}
+
+func (q *queue) enqueue(cmd [8]byte) int32 {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.count == len(q.storage) {
+		return 0
+	}
+	q.storage[q.write] = cmd
+	q.write++
+	if q.write == len(q.storage) {
+		q.write = 0
+	}
+	q.count++
+	return 1
+}
+
+func (q *queue) dequeue(out *[8]byte) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.count == 0 {
+		return false
+	}
+	*out = q.storage[q.read]
+	q.read++
+	if q.read == len(q.storage) {
+		q.read = 0
+	}
+	q.count--
+	return true
+}
+
+func (q *queue) length() uint32 {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return uint32(q.count)
+}
+
+var (
+	wifiQueueObj      *queue
+	wifiQueuePtr      unsafe.Pointer
+	wifiQueueHandle   unsafe.Pointer
+	queueMapMu        sync.Mutex
+	queueByAlias      = map[unsafe.Pointer]*queue{}
+	queueByHandle     = map[unsafe.Pointer]*queue{}
+)
+
+func registerQueue(handle unsafe.Pointer, alias unsafe.Pointer, q *queue) {
+	queueMapMu.Lock()
+	queueByHandle[handle] = q
+	if alias != nil {
+		queueByAlias[alias] = q
+	}
+	queueMapMu.Unlock()
+}
+
+func unregisterQueue(handle unsafe.Pointer, alias unsafe.Pointer) {
+	queueMapMu.Lock()
+	delete(queueByHandle, handle)
+	if alias != nil {
+		delete(queueByAlias, alias)
+	}
+	queueMapMu.Unlock()
+}
+
+func queueFromPtr(ptr unsafe.Pointer) *queue {
+	queueMapMu.Lock()
+	q := queueByAlias[ptr]
+	if q == nil {
+		q = queueByHandle[ptr]
+	}
+	queueMapMu.Unlock()
+	if q != nil {
+		return q
+	}
+	if ptr != nil {
+		handle := *(*unsafe.Pointer)(ptr)
+		queueMapMu.Lock()
+		q = queueByHandle[handle]
+		queueMapMu.Unlock()
+		if q != nil {
+			return q
+		}
+	}
+	return nil
+}
+
+//export espradio_generic_queue_create
+func espradio_generic_queue_create(queue_len, item_size int) unsafe.Pointer {
+	if item_size != 8 {
+		item_size = 8
+	}
+	if queue_len < 1 {
+		queue_len = 1
+	}
+	q := newQueue(queue_len)
+	handle := unsafe.Pointer(q)
+	ptr := unsafe.Pointer(&handle)
+	registerQueue(handle, ptr, q)
+	return ptr
+}
+
+//export espradio_generic_queue_delete
+func espradio_generic_queue_delete(ptr unsafe.Pointer) {
+	if ptr != nil {
+		unregisterQueue(ptr, nil)
+	}
+}
+
+//export espradio_wifi_create_queue
+func espradio_wifi_create_queue(queue_len, item_size int) unsafe.Pointer {
+	if item_size != 8 {
+		panic("espradio: unexpected queue item_size")
+	}
+	if queue_len < 1 {
+		queue_len = 1
+	}
+	wifiQueueObj = newQueue(queue_len)
+	wifiQueueHandle = unsafe.Pointer(wifiQueueObj)
+	wifiQueuePtr = unsafe.Pointer(&wifiQueueHandle)
+	registerQueue(wifiQueueHandle, wifiQueuePtr, wifiQueueObj)
+	return wifiQueuePtr
+}
+
+//export espradio_wifi_delete_queue
+func espradio_wifi_delete_queue(ptr unsafe.Pointer) {
+	unregisterQueue(wifiQueueHandle, wifiQueuePtr)
+	if ptr != nil && ptr != wifiQueuePtr {
+		unregisterQueue(ptr, nil)
+	}
+	wifiQueueObj = nil
+	wifiQueueHandle = nil
+	wifiQueuePtr = nil
+}
+
+//export espradio_queue_recv
+func espradio_queue_recv(ptr unsafe.Pointer, item unsafe.Pointer, block_time_tick uint32) int32 {
+	q := queueFromPtr(ptr)
+	if q == nil {
+		return 0
+	}
+
+	forever := block_time_tick == C.OSI_FUNCS_TIME_BLOCKING
+	start := time.Now()
+	var timeout time.Duration
+	if !forever {
+		timeout = time.Duration(block_time_tick) * time.Millisecond
+	}
+
+	var cmd [8]byte
+	for {
+		if q.dequeue(&cmd) {
+			*(*[8]byte)(item) = cmd
+			return 1
+		}
+		if !forever && time.Since(start) >= timeout {
+			return 0
+		}
+		safeGosched()
+	}
+}
+
+//export espradio_queue_send
+func espradio_queue_send(ptr unsafe.Pointer, item unsafe.Pointer, block_time_tick uint32) int32 {
+	q := queueFromPtr(ptr)
+	if q == nil {
+		return 0
+	}
+	_ = block_time_tick
+	cmd := *(*[8]byte)(item)
+	return q.enqueue(cmd)
+}
+
+//export espradio_queue_len
+func espradio_queue_len(ptr unsafe.Pointer) uint32 {
+	q := queueFromPtr(ptr)
+	if q == nil {
+		return 0
+	}
+	return q.length()
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
