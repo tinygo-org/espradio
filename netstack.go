@@ -1,3 +1,5 @@
+//go:build ignore
+
 package espradio
 
 import (
@@ -68,7 +70,7 @@ type NetStackConfig struct {
 }
 
 type NetStack struct {
-	dev   L2Device
+	dev   EthernetDevice
 	mac   [6]byte
 	debug bool
 
