@@ -1,10 +1,14 @@
 package main
 
 import (
+	"net/netip"
 	"time"
 
+	"github.com/soypat/lneto/dhcpv4"
 	"tinygo.org/x/espradio"
 )
+
+var dhcpServer dhcpv4.Server
 
 func main() {
 	time.Sleep(time.Second)
@@ -34,21 +38,40 @@ func main() {
 		return
 	}
 
-	println("ap: starting TCP/IP stack (static IP)...")
-	ns, err := espradio.NewNetStack(nd, espradio.NetStackConfig{
-		Debug:    true,
-		StaticIP: [4]byte{192, 168, 4, 1},
-		Mask:     [4]byte{255, 255, 255, 0},
+	const apIP = "192.168.4.1"
+	addr := netip.MustParseAddr(apIP)
+	subnet := netip.MustParsePrefix("192.168.4.0/24")
+
+	println("ap: creating lneto stack...")
+	stack, err := espradio.NewStack(nd, espradio.StackConfig{
+		Hostname:      "espradio-ap",
+		StaticAddress: addr,
+		MaxUDPPorts:   2,
 	})
 	if err != nil {
-		println("ap: netstack err:", err)
+		println("ap: stack err:", err)
 		return
 	}
 
-	println("ap: starting DHCP server...")
-	go ns.RunDHCPServer()
+	println("ap: configuring DHCP server...")
+	err = dhcpServer.Configure(dhcpv4.ServerConfig{
+		ServerAddr: addr.As4(),
+		Gateway:    addr.As4(),
+		Subnet:     subnet,
+	})
+	if err != nil {
+		println("ap: dhcp server configure err:", err)
+		return
+	}
 
-	println("ap: AP is running on", fmtIP(ns.IP()), "— connect to espradio-ap")
+	err = stack.LnetoStack().RegisterUDP(&dhcpServer, nil, dhcpv4.DefaultClientPort)
+	if err != nil {
+		println("ap: dhcp server register err:", err)
+		return
+	}
+
+	println("ap: AP is running on", apIP, "— connect to espradio-ap")
+	go stackLoop(stack)
 	for {
 		time.Sleep(3 * time.Second)
 		rxCb, rxDrop := espradio.NetifRxStats()
@@ -56,15 +79,16 @@ func main() {
 	}
 }
 
-func fmtIP(ip [4]byte) string {
-	d := func(b byte) string {
-		if b < 10 {
-			return string(rune('0' + b))
+func stackLoop(stack *espradio.Stack) {
+	for {
+		send, recv, err := stack.RecvAndSend()
+		if send == 0 && recv == 0 {
+			time.Sleep(5 * time.Millisecond)
 		}
-		if b < 100 {
-			return string(rune('0'+b/10)) + string(rune('0'+b%10))
+		if err != nil {
+			println("poll err:", err.Error())
 		}
-		return string(rune('0'+b/100)) + string(rune('0'+(b/10)%10)) + string(rune('0'+b%10))
+		_ = send
+		_ = recv
 	}
-	return d(ip[0]) + "." + d(ip[1]) + "." + d(ip[2]) + "." + d(ip[3])
 }
