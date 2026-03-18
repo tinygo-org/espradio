@@ -1,0 +1,3 @@
+[submodule "esp-wifi"]
+	path = esp-wifi
+	url = https://github.com/esp-rs/esp-wifi

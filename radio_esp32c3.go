@@ -2,11 +2,30 @@
 
 package espradio
 
-import "device/esp"
+/*
+#cgo CFLAGS: -Iblobs/include
+#cgo CFLAGS: -Iblobs/include/esp32c3
+#cgo CFLAGS: -Iblobs/include/local
+#cgo CFLAGS: -Iblobs/headers
+#cgo CFLAGS: -DCONFIG_SOC_WIFI_NAN_SUPPORT=0
+#cgo CFLAGS: -DESPRADIO_PHY_PATCH_ROMFUNCS=0
+#cgo LDFLAGS: -Lblobs/libs/esp32c3 -lcoexist -lcore -lmesh -lnet80211 -lespnow -lregulatory -lphy -lpp -lwpa_supplicant
+
+#include "include.h"
+*/
+import "C"
+
+import (
+	"device/esp"
+
+	_ "tinygo.org/x/espradio/esp32c3"
+)
+
+// ─── Hardware init ───────────────────────────────────────────────────────────
 
 func initHardware() error {
 	// See:
-	// https://github.com/esp-rs/esp-wifi/blob/v0.2.0/esp-wifi/src/common_adapter/common_adapter_esp32c3.rs#L18
+	// https://github.com/esp-rs/esp-wifi/blob/main/esp-wifi/src/common_adapter/common_adapter_esp32c3.rs#L18
 
 	const (
 		SYSTEM_WIFIBB_RST       = 1 << 0
