@@ -15,14 +15,13 @@ var _ EthernetDevice = (*NetDev)(nil)
 // NetDev provides raw Ethernet frame I/O over the WiFi STA interface.
 type NetDev struct {
 	rxHandler func(pkt []byte) error
-	pollBuf   []byte
 }
 
 func startNetDev(apMode int) (*NetDev, error) {
 	if code := C.espradio_netif_start_rx(C.int(apMode)); code != C.ESP_OK {
 		return nil, makeError(code)
 	}
-	return &NetDev{pollBuf: make([]byte, 1600)}, nil
+	return &NetDev{}, nil
 }
 
 // StartNetDev registers the STA RX callback and starts the receive pump.
@@ -50,22 +49,18 @@ func (nd *NetDev) SetEthRecvHandler(handler func(pkt []byte) error) {
 	nd.rxHandler = handler
 }
 
-func (nd *NetDev) EthPoll() (bool, error) {
+func (nd *NetDev) EthPoll(buf []byte) (bool, error) {
 	if C.espradio_netif_rx_available() == 0 {
 		return false, nil
 	}
-	gotWork := false
-	for C.espradio_netif_rx_available() != 0 {
-		n := C.espradio_netif_rx_pop(unsafe.Pointer(&nd.pollBuf[0]), C.uint16_t(len(nd.pollBuf)))
-		if n == 0 {
-			break
-		}
-		gotWork = true
-		if nd.rxHandler != nil {
-			nd.rxHandler(nd.pollBuf[:n])
-		}
+	n := C.espradio_netif_rx_pop(unsafe.Pointer(&buf[0]), C.uint16_t(len(buf)))
+	if n == 0 {
+		return false, nil
 	}
-	return gotWork, nil
+	if nd.rxHandler != nil {
+		nd.rxHandler(buf[:n])
+	}
+	return true, nil
 }
 
 func (nd *NetDev) HardwareAddr6() (mac [6]byte, _ error) {
@@ -77,7 +72,7 @@ func (nd *NetDev) HardwareAddr6() (mac [6]byte, _ error) {
 }
 
 func (nd *NetDev) MaxFrameSize() int {
-	return EthMTU
+	return MaxFrameSize
 }
 
 func (nd *NetDev) NetFlags() net.Flags {

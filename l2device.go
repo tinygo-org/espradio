@@ -2,7 +2,7 @@ package espradio
 
 import "net"
 
-const EthMTU = 1500
+const MaxFrameSize = 1518
 
 // L2Device is the interface a TCP/IP stack needs from a link-layer device.
 //
@@ -48,7 +48,7 @@ type EthernetDevice interface {
 	// over SPI), reads from the bus and invokes the handler for each
 	// received frame. Behaviour for interrupt driven devices is undefined
 	// at the moment.
-	EthPoll() (bool, error)
+	EthPoll(buf []byte) (bool, error)
 
 	// HardwareAddr6 returns the device's 6-byte MAC address.
 	// For PHY-only devices, returns the MAC provided at configuration.

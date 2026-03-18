@@ -5,6 +5,7 @@ import (
 	"net/netip"
 	"time"
 
+	"github.com/soypat/lneto/ethernet"
 	"github.com/soypat/lneto/x/xnet"
 )
 
@@ -12,7 +13,7 @@ import (
 type Stack struct {
 	s       xnet.StackAsync
 	dev     *NetDev
-	sendbuf []byte
+	rxtxBuf []byte
 }
 
 // StackConfig configures the lneto-based network stack.
@@ -43,6 +44,7 @@ func NewStack(dev *NetDev, cfg StackConfig) (*Stack, error) {
 	}
 
 	stack := &Stack{dev: dev}
+	const MTU = MaxFrameSize - ethernet.MaxOverheadSize + 4 // CRC not included:+4
 	err = stack.s.Reset(xnet.StackConfig{
 		StaticAddress:   cfg.StaticAddress,
 		DNSServer:       cfg.DNSServer,
@@ -52,7 +54,7 @@ func NewStack(dev *NetDev, cfg StackConfig) (*Stack, error) {
 		MaxUDPConns:     cfg.MaxUDPPorts,
 		RandSeed:        time.Now().UnixNano() ^ cfg.RandSeed,
 		HardwareAddress: mac,
-		MTU:             EthMTU,
+		MTU:             MTU,
 	})
 	if err != nil {
 		return nil, err
@@ -60,7 +62,7 @@ func NewStack(dev *NetDev, cfg StackConfig) (*Stack, error) {
 	dev.SetEthRecvHandler(func(pkt []byte) error {
 		return stack.s.Demux(pkt, 0)
 	})
-	stack.sendbuf = make([]byte, dev.MaxFrameSize())
+	stack.rxtxBuf = make([]byte, MTU+ethernet.MaxOverheadSize)
 	return stack, nil
 }
 
@@ -77,12 +79,12 @@ func (stack *Stack) Hostname() string {
 // RecvAndSend polls the device for received frames and sends any pending
 // outgoing frames. Returns the number of bytes sent and received.
 func (stack *Stack) RecvAndSend() (send, recv int, err error) {
-	gotRecv, errrecv := stack.dev.EthPoll()
+	gotRecv, errrecv := stack.dev.EthPoll(stack.rxtxBuf)
 	if gotRecv {
 		recv = 1 // At least one frame was processed.
 	}
 
-	send, err = stack.s.Encapsulate(stack.sendbuf, -1, 0)
+	send, err = stack.s.Encapsulate(stack.rxtxBuf, -1, 0)
 	if err != nil {
 		return send, recv, err
 	} else if errrecv != nil {
@@ -92,7 +94,7 @@ func (stack *Stack) RecvAndSend() (send, recv int, err error) {
 		return send, recv, err
 	}
 
-	err = stack.dev.SendEthFrame(stack.sendbuf[:send])
+	err = stack.dev.SendEthFrame(stack.rxtxBuf[:send])
 	return send, recv, err
 }
 

@@ -60,20 +60,7 @@ func main() {
 	}
 
 	// Start the poll loop in the background.
-	go func() {
-		for {
-			send, recv, err := stack.RecvAndSend()
-			if send == 0 && recv == 0 {
-				time.Sleep(5 * time.Millisecond)
-			}
-			if err != nil {
-				println("poll err:", err.Error())
-			}
-			_ = send
-			_ = recv
-		}
-	}()
-
+	go stackLoop(stack)
 	println("starting DHCP...")
 	dhcp, err := stack.SetupWithDHCP(espradio.DHCPConfig{})
 	if err != nil {
@@ -82,11 +69,26 @@ func main() {
 	}
 	println("got IP:", dhcp.AssignedAddr.String())
 	println("gateway:", dhcp.Router.String())
-	println("DNS:", dhcp.DNSServers[0].String())
-
+	if len(dhcp.DNSServers) > 0 {
+		println("DNS:", dhcp.DNSServers[0].String())
+	}
 	println("done!")
 	for {
 		time.Sleep(1 * time.Second)
 		println("alive")
+	}
+}
+
+func stackLoop(stack *espradio.Stack) {
+	for {
+		send, recv, err := stack.RecvAndSend()
+		if send == 0 && recv == 0 {
+			time.Sleep(5 * time.Millisecond)
+		}
+		if err != nil {
+			println("poll err:", err.Error())
+		}
+		_ = send
+		_ = recv
 	}
 }
