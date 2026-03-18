@@ -48,69 +48,45 @@ func main() {
 		return
 	}
 
-	println("starting TCP/IP stack (DHCP)...")
-	ns, err := espradio.NewNetStack(nd, espradio.NetStackConfig{Debug: false})
+	println("creating lneto stack...")
+	stack, err := espradio.NewStack(nd, espradio.StackConfig{
+		Hostname:    "espradio",
+		MaxUDPPorts: 2,
+		MaxTCPPorts: 1,
+	})
 	if err != nil {
-		println("netstack failed:", err)
-		return
-	}
-	println("got IP:", fmtIP(ns.IP()))
-
-	// --- HTTP GET ---
-	println("resolving httpbin.org...")
-	addr, err := ns.Resolve("httpbin.org")
-	if err != nil {
-		println("DNS failed:", err)
-		return
-	}
-	println("httpbin.org =", fmtIP(addr))
-
-	println("TCP connecting to", fmtIP(addr), ":80 ...")
-	fd, err := ns.TCPDial(addr, 80)
-	if err != nil {
-		println("TCP connect failed:", err)
-		return
-	}
-	println("TCP connected! fd=", fd)
-
-	req := "GET /ip HTTP/1.1\r\nHost: httpbin.org\r\nConnection: close\r\n\r\n"
-	println("sending HTTP request...")
-	_, err = ns.Send(fd, []byte(req))
-	if err != nil {
-		println("send failed:", err)
+		println("stack failed:", err)
 		return
 	}
 
-	println("reading response...")
-	buf := make([]byte, 1024)
-	for {
-		n, err := ns.Recv(fd, buf)
-		if n > 0 {
-			println(string(buf[:n]))
+	// Start the poll loop in the background.
+	go func() {
+		for {
+			send, recv, err := stack.RecvAndSend()
+			if send == 0 && recv == 0 {
+				time.Sleep(5 * time.Millisecond)
+			}
+			if err != nil {
+				println("poll err:", err.Error())
+			}
+			_ = send
+			_ = recv
 		}
-		if err != nil {
-			break
-		}
-	}
+	}()
 
-	ns.CloseSock(fd)
+	println("starting DHCP...")
+	dhcp, err := stack.SetupWithDHCP(espradio.DHCPConfig{})
+	if err != nil {
+		println("DHCP failed:", err)
+		return
+	}
+	println("got IP:", dhcp.AssignedAddr.String())
+	println("gateway:", dhcp.Router.String())
+	println("DNS:", dhcp.DNSServers[0].String())
+
 	println("done!")
-
 	for {
 		time.Sleep(1 * time.Second)
 		println("alive")
 	}
-}
-
-func fmtIP(ip [4]byte) string {
-	d := func(b byte) string {
-		if b < 10 {
-			return string(rune('0' + b))
-		}
-		if b < 100 {
-			return string(rune('0'+b/10)) + string(rune('0'+b%10))
-		}
-		return string(rune('0'+b/100)) + string(rune('0'+(b/10)%10)) + string(rune('0'+b%10))
-	}
-	return d(ip[0]) + "." + d(ip[1]) + "." + d(ip[2]) + "." + d(ip[3])
 }

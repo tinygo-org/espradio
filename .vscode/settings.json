@@ -3,6 +3,6 @@
         "GOOS": "linux",
         "GOARCH": "arm",
         "GOROOT": "/home/pato/.cache/tinygo/goroot-66ab96b98619019787146f7e3961483ad5d2960665e9959cc2336cec78ef74c0",
-        "GOFLAGS": "-tags=xtensa,baremetal,linux,arm,esp32,esp,tinygo,purego,osusergo,math_big_pure_go,gc.conservative,scheduler.tasks,serial.uart,tinygo.unicore"
+        "GOFLAGS": "-tags=tinygo.riscv,baremetal,linux,arm,tinygo.riscv32,esp32c3,esp,xiao_esp32c3,tinygo,purego,osusergo,math_big_pure_go,gc.conservative,scheduler.tasks,serial.usb,tinygo.unicore"
     }
 }
