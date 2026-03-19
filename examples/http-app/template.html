@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pico Ethernet</title>
+<style>
+body{font-family:Arial,sans-serif;background:#f4f4f4;margin:0;padding:20px;display:flex;justify-content:center;min-height:100vh}
+.c{text-align:center}h1{color:#333;margin:0 0 12px}input,button{padding:6px;margin:4px}
+button:disabled{opacity:.5}ul{list-style:none;padding:0;margin:12px 0 0}li{color:#555;margin:2px 0}
+</style>
+</head>
+<body><div class="c">
+<h1>Pico Ethernet</h1>
+<form onsubmit="t();return false"><input id="cs" type="text" maxlength="4" placeholder="Callsign" autofocus><button id="b">Toggle LED</button></form>
+<!--A--><p style="margin-top:24px;color:#999;font-size:small">🌐 Powered by <a href="https://github.com/soypat/lneto">lneto</a></p></div>
+<script>var c=document.getElementById("cs");function t(){var b=document.getElementById("b");b.disabled=true;var x=new XMLHttpRequest();x.open("GET","/toggle-led?callsign="+encodeURIComponent(c.value));x.onloadend=function(){location.href="/?c="+c.value};x.send()}var m=location.search.match(/c=([^&]*)/);if(m)c.value=m[1]</script>
+</body>
+</html>
