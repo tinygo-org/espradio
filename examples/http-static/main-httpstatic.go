@@ -136,6 +136,10 @@ func main() {
 			time.Sleep(time.Second)
 			continue
 		}
+		// Beware, this allocates a stack on the heap on
+		// every connection. See http-app example on
+		// how to allocate a pool of connections up front
+		// and avoid heap allocations.
 		go handleConn(conn, httpBuf.(*httpraw.Header))
 	}
 }
