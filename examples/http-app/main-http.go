@@ -88,7 +88,9 @@ func main() {
 	}
 
 	// Start the poll loop in the background.
+	// VERY IMPORTANT TO START BEFORE USING STACK!
 	go loopForeverStack(espstack)
+
 	println("starting DHCP...")
 	dhcp, err := espstack.SetupWithDHCP(espradio.DHCPConfig{})
 	if err != nil {
