@@ -36,8 +36,10 @@ func main() {
 		println("AP:", ap.SSID, "RSSI", ap.RSSI)
 	}
 
-	println("scan finished")
+	c := 1
 	for {
-		time.Sleep(5 * time.Second)
+		println("scan finished", c)
+		c++
+		time.Sleep(1 * time.Second)
 	}
 }

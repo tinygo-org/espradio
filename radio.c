@@ -41,8 +41,12 @@ extern void *g_phyFuns;
 extern wifi_osi_funcs_t *g_osi_funcs_p;
 extern int rtc_get_reset_reason(int cpu_no);
 
-/* Stub for the WIFI_INIT_CONFIG_DEFAULT() macro; we actually use espradio_osi_funcs below */
+/* Stub for the WIFI_INIT_CONFIG_DEFAULT() macro; also kept filled as fallback. */
 wifi_osi_funcs_t g_wifi_osi_funcs = {0};
+
+/* Heap-allocated copy of the OSI table. Placed well away from BSS/DATA to avoid
+ * WiFi DMA corruption (PMP confirmed the zeroing bypasses the CPU). */
+wifi_osi_funcs_t *s_heap_osi_funcs;
 
 extern wifi_osi_funcs_t espradio_osi_funcs;
 
@@ -56,7 +60,7 @@ void espradio_set_blob_log_level(uint32_t level) {
 
 uint32_t espradio_wifi_boot_state(void) {
     uint32_t state = 0;
-    if (g_osi_funcs_p == &espradio_osi_funcs) {
+    if (g_osi_funcs_p == s_heap_osi_funcs || g_osi_funcs_p == &g_wifi_osi_funcs) {
         state |= 1u;
     }
     if (g_phyFuns != NULL) {
@@ -65,10 +69,11 @@ uint32_t espradio_wifi_boot_state(void) {
     return state;
 }
 
-const wpa_crypto_funcs_t g_wifi_default_wpa_crypto_funcs = {
-    .size = sizeof(wpa_crypto_funcs_t),
-    .version = ESP_WIFI_CRYPTO_VERSION,
-};
+/* g_wifi_default_wpa_crypto_funcs is provided by libwpa_supplicant.a
+ * (crypto_ops.c.obj) with real implementations of HMAC-SHA256, PBKDF2,
+ * AES-128, OMAC1, CCMP, AES-GMAC, SHA-256.  Do NOT define it here —
+ * overriding with a zeroed struct leaves the crypto function pointers
+ * NULL and crashes on WPA2 GTK rekey. */
 
 /* One-time ROM hook setup: route ets_printf/esp_rom_printf to UART
  * and install a global lock based on ROM interrupt lock/unlock.
@@ -120,27 +125,43 @@ esp_err_t espradio_wifi_init(void) {
               rtc_get_reset_reason(0), rtc_get_reset_reason(1));
     phy_get_romfunc_addr();
     RADIO_DBG("espradio: phy_get_romfunc_addr g_phyFuns=%p\n", g_phyFuns);
+
+    /* Allocate the OSI table on the heap, with 256-byte alignment and a
+     * 256-byte guard region on each side.  PMP analysis proved that the
+     * field-100 zeroing bypasses the CPU (WiFi DMA), so moving the table
+     * far from BSS prevents DMA descriptor mispointing from hitting it. */
+    {
+        size_t total = 256 + sizeof(wifi_osi_funcs_t) + 256;
+        uint8_t *raw = (uint8_t *)malloc(total);
+        if (!raw) return ESP_ERR_NO_MEM;
+        memset(raw, 0, total);
+        /* Align the table start to a 256-byte boundary within the allocation. */
+        uintptr_t table_addr = ((uintptr_t)raw + 256 + 255) & ~(uintptr_t)255;
+        s_heap_osi_funcs = (wifi_osi_funcs_t *)table_addr;
+        memcpy(s_heap_osi_funcs, &espradio_osi_funcs, sizeof(wifi_osi_funcs_t));
+    }
+
+    /* Populate g_wifi_osi_funcs as a backup; do NOT set g_osi_funcs_p yet.
+     * The blob's wifi_osi_funcs_register (called inside esp_wifi_init_internal)
+     * checks g_osi_funcs_p at entry and skips critical init if it's non-zero. */
+    memcpy(&g_wifi_osi_funcs, &espradio_osi_funcs, sizeof(wifi_osi_funcs_t));
+
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    cfg.osi_funcs = &espradio_osi_funcs;
+    cfg.osi_funcs = s_heap_osi_funcs;
     cfg.nvs_enable = 0;
 
     extern wifi_osi_funcs_t *wifi_funcs;
-    wifi_funcs = &espradio_osi_funcs;
-    memcpy(&g_wifi_osi_funcs, &espradio_osi_funcs, sizeof(wifi_osi_funcs_t));
+    wifi_funcs = s_heap_osi_funcs;
 
-    esp_wifi_set_sleep_min_active_time(50000);
-    esp_wifi_set_keep_alive_time(10000000);
-    esp_wifi_set_sleep_wait_broadcast_data_time(15000);
     RADIO_DBG("espradio: before esp_wifi_bt_power_domain_on\n");
     esp_wifi_bt_power_domain_on();
     RADIO_DBG("espradio: after esp_wifi_bt_power_domain_on\n");
     espradio_bt_irq_prewire();
 
     extern void espradio_coex_adapter_init(void);
-    extern int coex_pre_init(void);
     espradio_coex_adapter_init();
-    int coex_rc = coex_pre_init();
-    RADIO_DBG("espradio: coex_pre_init -> %d\n", coex_rc);
+    extern esp_err_t coex_pre_init(void);
+    coex_pre_init();
 
     esp_err_t ret = esp_wifi_init_internal(&cfg);
     if (ret == 0) {

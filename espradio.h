@@ -17,6 +17,11 @@ void espradio_prepare_memory_for_wifi(void);
 void espradio_ensure_osi_ptr(void);
 void espradio_coex_adapter_init(void);
 void espradio_call_saved_isr(int32_t n);
+void espradio_call_wifi_isr(void);
+void espradio_prewire_wifi_interrupts(void);
+void espradio_wifi_int_to_level(void);
+void espradio_ints_on(uint32_t mask);
+void espradio_ints_off(uint32_t mask);
 int32_t espradio_queue_send(void *queue, void *item, uint32_t block_time_tick);
 uint32_t espradio_isr_ring_head(void);
 uint32_t espradio_isr_ring_tail(void);
@@ -40,6 +45,8 @@ esp_err_t espradio_ap_set_config(const char *ssid, int ssid_len,
 extern esp_err_t esp_wifi_connect_internal(void);
 
 /* ===== netif (netif.c) ===== */
+void      espradio_netif_init_netstack_cb(void);
+void      espradio_post_start_cb(void);
 esp_err_t espradio_netif_start_rx(int ap_mode);
 int       espradio_netif_rx_available(void);
 uint16_t  espradio_netif_rx_pop(void *dst, uint16_t dst_len);

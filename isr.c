@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdio.h>
 
 /* ---- ISR fn/arg storage ---- */
 
@@ -22,6 +23,24 @@ void espradio_call_saved_isr(int32_t n) {
     __asm__ volatile ("fence" ::: "memory");
     if (n >= 0 && n < 32 && s_isr_fn[n]) {
         s_isr_fn[n](s_isr_arg[n]);
+    }
+    __asm__ volatile ("fence" ::: "memory");
+    s_in_isr = 0;
+}
+
+/* Dispatch all WiFi-related ISR handlers.  The blob registers its ISR
+ * via set_isr(n, fn, arg) where n may be 0 (WIFI_MAC source) or 1.
+ * In Rust esp-wifi both indices map to a single handler object; here
+ * we call every non-NULL entry in the WiFi source range (0-3) so that
+ * no registered handler is missed regardless of which index the blob
+ * chose.  Called from the Go interrupt handler for CPU interrupt 1. */
+void espradio_call_wifi_isr(void) {
+    s_in_isr = 1;
+    __asm__ volatile ("fence" ::: "memory");
+    for (int i = 0; i < 4; i++) {
+        if (s_isr_fn[i]) {
+            s_isr_fn[i](s_isr_arg[i]);
+        }
     }
     __asm__ volatile ("fence" ::: "memory");
     s_in_isr = 0;

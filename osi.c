@@ -13,34 +13,56 @@
 #define ESPRADIO_PHY_MODEM_WIFI 1u
 
 extern wifi_osi_funcs_t espradio_osi_funcs;
-extern int coex_pti_get(uint32_t event, uint8_t *pti);
 static void espradio_wifi_reset_mac(void);
 void espradio_timer_pending_reset(void);
 
 wifi_osi_funcs_t *g_osi_funcs_p;
 
+/* Declared in radio.c — heap-allocated OSI table placed far from BSS to avoid
+ * WiFi DMA corruption.  All runtime table updates go here AND to g_wifi_osi_funcs. */
+extern wifi_osi_funcs_t *s_heap_osi_funcs __attribute__((weak));
+
+static void espradio_sync_osi_tables(void) {
+    memcpy(&g_wifi_osi_funcs, &espradio_osi_funcs, sizeof(wifi_osi_funcs_t));
+    if (s_heap_osi_funcs) {
+        memcpy(s_heap_osi_funcs, &espradio_osi_funcs, sizeof(wifi_osi_funcs_t));
+    }
+    /* NOTE: do NOT set g_osi_funcs_p here.  The blob's wifi_osi_funcs_register
+     * checks "g_osi_funcs_p != 0" at entry and returns immediately if it is
+     * already set, skipping critical blob-internal variable initialization.
+     * g_osi_funcs_p is set by the blob inside esp_wifi_init_internal(). */
+}
+
 void espradio_prepare_memory_for_wifi(void) {
-    g_osi_funcs_p = &espradio_osi_funcs;
+    espradio_sync_osi_tables();
 #if ESPRADIO_OSI_DEBUG
     printf("osi: prepare_memory_for_wifi (no-op wdev_last_desc_reset_ptr)\n");
 #endif
 }
 
 void espradio_ensure_osi_ptr(void) {
-    g_osi_funcs_p = &espradio_osi_funcs;
-    memcpy(&g_wifi_osi_funcs, &espradio_osi_funcs, sizeof(wifi_osi_funcs_t));
+    espradio_sync_osi_tables();
 #if ESPRADIO_OSI_DEBUG
     printf("osi: ensure_osi_ptr\n");
 #endif
 }
 
+extern void espradio_post_start_cb(void);
+
 esp_err_t espradio_esp_wifi_start(void) {
 #if ESPRADIO_OSI_DEBUG
     printf("osi: esp_wifi_start (write table then call blob)\n");
 #endif
-    g_osi_funcs_p = &espradio_osi_funcs;
+    memcpy(&g_wifi_osi_funcs, &espradio_osi_funcs, sizeof(wifi_osi_funcs_t));
+    if (s_heap_osi_funcs) {
+        memcpy(s_heap_osi_funcs, &espradio_osi_funcs, sizeof(wifi_osi_funcs_t));
+    }
     espradio_timer_pending_reset();
-    return esp_wifi_start();
+    esp_err_t rc = esp_wifi_start();
+    if (rc == ESP_OK) {
+        espradio_post_start_cb();
+    }
+    return rc;
 }
 
 /* Simple printf backend expected by libcoexist.a. */
@@ -141,32 +163,15 @@ static uint32_t espradio_queue_msg_waiting(void *queue) {
     return espradio_queue_len(queue);
 }
 
-static void *espradio_event_group_create(void) {
-    espradio_panic("todo: _event_group_create");
-}
-
-static void espradio_event_group_delete(void *event) {
-    espradio_panic("todo: _event_group_delete");
-}
-
-static uint32_t espradio_event_group_set_bits(void *event, uint32_t bits) {
-    espradio_panic("todo: _event_group_set_bits");
-}
-
-static uint32_t espradio_event_group_clear_bits(void *event, uint32_t bits) {
-    espradio_panic("todo: _event_group_clear_bits");
-}
-
-static uint32_t espradio_event_group_wait_bits(void *event, uint32_t bits_to_wait_for, int clear_on_exit, int wait_for_all_bits, uint32_t block_time_tick) {
-#if ESPRADIO_OSI_DEBUG
-    printf("osi: event_group_wait_bits ev=%p bits=0x%lx\n", (void *)event, (unsigned long)bits_to_wait_for);
-#endif
-    (void)event;
-    (void)clear_on_exit;
-    (void)wait_for_all_bits;
-    (void)block_time_tick;
-    return bits_to_wait_for;
-}
+/* Event group functions — implemented in Go (radio.go), declared here
+ * so the OSI table references the Go exports instead of stale C stubs. */
+void *espradio_event_group_create(void);
+void  espradio_event_group_delete(void *event);
+uint32_t espradio_event_group_set_bits(void *event, uint32_t bits);
+uint32_t espradio_event_group_clear_bits(void *event, uint32_t bits);
+uint32_t espradio_event_group_wait_bits(void *event, uint32_t bits_to_wait_for,
+                                        int clear_on_exit, int wait_for_all_bits,
+                                        uint32_t block_time_tick);
 
 void espradio_run_task(void *task_func, void *task_handle) {
 #if ESPRADIO_OSI_DEBUG
@@ -485,6 +490,19 @@ static void espradio_wifi_apb80m_request(void) {
 
 static void espradio_wifi_apb80m_release(void) {
 }
+
+/* The blob calls _wifi_clock_enable/_wifi_clock_disable asymmetrically
+ * (more disables than enables).  With a ref-counted implementation the
+ * ref count eventually underflows, powering down the WiFi domain while
+ * the radio is still active → pc:nil.  Rust esp-wifi discovered this
+ * and makes both callbacks no-ops; clocks are pre-enabled once at boot
+ * via espradio_hal_init_clocks_go() in Enable(). */
+static void espradio_wifi_clock_enable_noop(void) { }
+static void espradio_wifi_clock_disable_noop(void) { }
+
+/* Same issue for RTC isolation: the blob toggles ISO asymmetrically. */
+static void espradio_wifi_rtc_enable_iso_noop(void) { }
+static void espradio_wifi_rtc_disable_iso_noop(void) { }
 
 static void espradio_phy_disable(void) {
     phy_wifi_enable_set(0);
@@ -1076,25 +1094,90 @@ void vPortFree(void *p) {
 void * espradio_wifi_create_queue(int queue_len, int item_size);
 
 void espradio_wifi_delete_queue(void * queue);
-extern int coex_schm_flexible_period_set(uint8_t period);
-extern uint8_t coex_schm_flexible_period_get(void);
 
-static uint32_t espradio_coex_status_get(void) {
-    espradio_ensure_osi_ptr();
-    return coex_status_get(0);
-}
+/* -------------------------------------------------------------------------
+ * Coex stubs — WiFi-only, no Bluetooth coexistence needed.
+ *
+ * Many libcoexist.a functions (even those in flash) internally call ROM
+ * trampoline functions (coex_schm_lock, coex_schm_unlock, coex_core_request,
+ * etc.) whose implementation pointers in DRAM are never fully initialized.
+ * Calling any of them crashes with pc:nil.
+ *
+ * We replace ALL coex entries in the wifi_osi_funcs_t table with safe stubs
+ * that never touch libcoexist or ROM code.
+ * ----------------------------------------------------------------------- */
+
+static int espradio_coex_init(void) { return 0; }
+static void espradio_coex_deinit(void) {}
+static int espradio_coex_enable(void) { return 0; }
+static void espradio_coex_disable(void) {}
+
+static uint32_t espradio_coex_status_get(void) { return 0; }
 
 static void espradio_coex_condition_set(uint32_t type, bool dissatisfy) {
-    (void)type;
-    (void)dissatisfy;
+    (void)type; (void)dissatisfy;
+}
+
+static int espradio_coex_wifi_request(uint32_t event, uint32_t latency, uint32_t duration) {
+    (void)event; (void)latency; (void)duration;
+    return 0;
 }
 
 static int espradio_coex_wifi_release(uint32_t event) {
-    return coex_wifi_release(event);
+    (void)event; return 0;
 }
 
+static int espradio_coex_wifi_channel_set(uint8_t primary, uint8_t secondary) {
+    (void)primary; (void)secondary;
+    return 0;
+}
+
+static int espradio_coex_event_duration_get(uint32_t event, uint32_t *duration) {
+    (void)event;
+    if (duration) *duration = 0;
+    return 0;
+}
+
+static int espradio_coex_pti_get(uint32_t event, uint8_t *pti) {
+    (void)event;
+    if (pti) *pti = 0;
+    return 0;
+}
+
+static void espradio_coex_schm_status_bit_clear(uint32_t type, uint32_t status) {
+    (void)type; (void)status;
+}
+
+static void espradio_coex_schm_status_bit_set(uint32_t type, uint32_t status) {
+    (void)type; (void)status;
+}
+
+static int espradio_coex_schm_interval_set(uint32_t interval) {
+    (void)interval; return 0;
+}
+
+static uint32_t espradio_coex_schm_interval_get(void) { return 0; }
+static uint8_t espradio_coex_schm_curr_period_get(void) { return 0; }
+static void *espradio_coex_schm_curr_phase_get(void) { return NULL; }
+static int espradio_coex_schm_process_restart(void) { return 0; }
+
 static int espradio_coex_schm_register_cb(int type, int (*cb)(int)) {
-    return coex_schm_register_callback((coex_schm_callback_type_t)type, (void *)cb);
+    (void)type; (void)cb;
+    return 0;
+}
+
+static int espradio_coex_register_start_cb(int (*cb)(void)) {
+    (void)cb; return 0;
+}
+
+static int espradio_coex_schm_flexible_period_set(uint8_t period) {
+    (void)period; return 0;
+}
+
+static uint8_t espradio_coex_schm_flexible_period_get(void) { return 0; }
+
+static void *espradio_coex_schm_get_phase_by_idx(int idx) {
+    (void)idx; return NULL;
 }
 
 /* Coexistence adapter (esp_coexist_adapter.h) ********************************************/
@@ -1327,10 +1410,10 @@ wifi_osi_funcs_t espradio_osi_funcs = {
     ._timer_setfn = espradio_timer_setfn,
     ._timer_arm_us = espradio_timer_arm_us,
     ._wifi_reset_mac = espradio_wifi_reset_mac,
-    ._wifi_clock_enable = espradio_hal_init_clocks_go,
-    ._wifi_clock_disable = espradio_hal_disable_clocks_go,
-    ._wifi_rtc_enable_iso = espradio_hal_wifi_rtc_enable_iso_go,
-    ._wifi_rtc_disable_iso = espradio_hal_wifi_rtc_disable_iso_go,
+    ._wifi_clock_enable = espradio_wifi_clock_enable_noop,
+    ._wifi_clock_disable = espradio_wifi_clock_disable_noop,
+    ._wifi_rtc_enable_iso = espradio_wifi_rtc_enable_iso_noop,
+    ._wifi_rtc_disable_iso = espradio_wifi_rtc_disable_iso_noop,
     ._esp_timer_get_time = espradio_esp_timer_get_time,
     ._nvs_set_i8 = espradio_nvs_set_i8,
     ._nvs_get_i8 = espradio_nvs_get_i8,
@@ -1361,28 +1444,28 @@ wifi_osi_funcs_t espradio_osi_funcs = {
     ._wifi_zalloc = espradio_wifi_zalloc,
     ._wifi_create_queue = espradio_wifi_create_queue,
     ._wifi_delete_queue = espradio_wifi_delete_queue,
-    ._coex_init = coex_init,
-    ._coex_deinit = coex_deinit,
-    ._coex_enable = coex_enable,
-    ._coex_disable = coex_disable,
+    ._coex_init = espradio_coex_init,
+    ._coex_deinit = espradio_coex_deinit,
+    ._coex_enable = espradio_coex_enable,
+    ._coex_disable = espradio_coex_disable,
     ._coex_status_get = espradio_coex_status_get,
     ._coex_condition_set = espradio_coex_condition_set,
-    ._coex_wifi_request = coex_wifi_request,
+    ._coex_wifi_request = espradio_coex_wifi_request,
     ._coex_wifi_release = espradio_coex_wifi_release,
-    ._coex_wifi_channel_set = coex_wifi_channel_set,
-    ._coex_event_duration_get = coex_event_duration_get,
-    ._coex_pti_get = coex_pti_get,
-    ._coex_schm_status_bit_clear = coex_schm_status_bit_clear,
-    ._coex_schm_status_bit_set = coex_schm_status_bit_set,
-    ._coex_schm_interval_set = coex_schm_interval_set,
-    ._coex_schm_interval_get = coex_schm_interval_get,
-    ._coex_schm_curr_period_get = coex_schm_curr_period_get,
-    ._coex_schm_curr_phase_get = coex_schm_curr_phase_get,
-    ._coex_schm_process_restart = coex_schm_process_restart,
+    ._coex_wifi_channel_set = espradio_coex_wifi_channel_set,
+    ._coex_event_duration_get = espradio_coex_event_duration_get,
+    ._coex_pti_get = espradio_coex_pti_get,
+    ._coex_schm_status_bit_clear = espradio_coex_schm_status_bit_clear,
+    ._coex_schm_status_bit_set = espradio_coex_schm_status_bit_set,
+    ._coex_schm_interval_set = espradio_coex_schm_interval_set,
+    ._coex_schm_interval_get = espradio_coex_schm_interval_get,
+    ._coex_schm_curr_period_get = espradio_coex_schm_curr_period_get,
+    ._coex_schm_curr_phase_get = espradio_coex_schm_curr_phase_get,
+    ._coex_schm_process_restart = espradio_coex_schm_process_restart,
     ._coex_schm_register_cb = espradio_coex_schm_register_cb,
-    ._coex_register_start_cb = coex_register_start_cb,
-    ._coex_schm_flexible_period_set = coex_schm_flexible_period_set,
-    ._coex_schm_flexible_period_get = coex_schm_flexible_period_get,
-    ._coex_schm_get_phase_by_idx = coex_schm_get_phase_by_idx,
+    ._coex_register_start_cb = espradio_coex_register_start_cb,
+    ._coex_schm_flexible_period_set = espradio_coex_schm_flexible_period_set,
+    ._coex_schm_flexible_period_get = espradio_coex_schm_flexible_period_get,
+    ._coex_schm_get_phase_by_idx = espradio_coex_schm_get_phase_by_idx,
     ._magic = ESP_WIFI_OS_ADAPTER_MAGIC,
 };

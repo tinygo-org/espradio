@@ -38,8 +38,24 @@ func (e Error) Error() string {
 			return "espradio: no memory"
 		case C.ESP_ERR_INVALID_ARG:
 			return "espradio: invalid argument"
+		case C.ESP_ERR_TIMEOUT:
+			return "espradio: timeout"
+		case 2:
+			return "espradio: auth expired"
+		case 15:
+			return "espradio: 4-way handshake timeout"
+		case 201:
+			return "espradio: AP not found"
+		case 202:
+			return "espradio: auth failed"
+		case 203:
+			return "espradio: assoc failed"
+		case 204:
+			return "espradio: handshake timeout"
+		case 205:
+			return "espradio: connection failed"
 		default:
-			return "espradio: unknown error"
+			return "espradio: error " + strconv.FormatInt(int64(int32(e)), 10)
 		}
 	}
 }
