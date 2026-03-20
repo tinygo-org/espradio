@@ -7,8 +7,8 @@ import (
 )
 
 const (
-	wifiSSID = "Kracozabra"
-	wifiPass = "09655455"
+	wifiSSID = "yourssid"
+	wifiPass = "yourpassword"
 )
 
 func main() {
@@ -16,7 +16,7 @@ func main() {
 
 	println("initializing radio...")
 	err := espradio.Enable(espradio.Config{
-		Logging: espradio.LogLevelNone,
+		Logging: espradio.LogLevelError,
 	})
 	if err != nil {
 		println("could not enable radio:", err)

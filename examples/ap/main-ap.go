@@ -73,7 +73,7 @@ func main() {
 	println("ap: AP is running on", apIP, "— connect to espradio-ap")
 	go stackLoop(stack)
 	for {
-		time.Sleep(3 * time.Second)
+		time.Sleep(1 * time.Second)
 		rxCb, rxDrop := espradio.NetifRxStats()
 		println("ap: rx_cb=", rxCb, "rx_drop=", rxDrop)
 	}

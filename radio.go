@@ -102,6 +102,16 @@ func startSchedTicker() {
 }
 
 func schedOnce() {
+	// Poll the WiFi blob ISR to catch events where the hardware level
+	// stayed asserted but no new edge was generated.  This compensates
+	// for the edge-triggered interrupt mode losing events when the
+	// peripheral line never transitions low between assertions.
+	// Interrupts are disabled during the poll to prevent reentrant
+	// calls to the blob ISR from a real edge interrupt.
+	mask := interrupt.Disable()
+	C.espradio_call_wifi_isr()
+	interrupt.Restore(mask)
+
 	for C.espradio_isr_ring_tail() != C.espradio_isr_ring_head() {
 		idx := C.espradio_isr_ring_tail()
 		q := C.espradio_isr_ring_entry_queue(idx)
@@ -140,10 +150,12 @@ func Enable(config Config) error {
 	C.espradio_ensure_osi_ptr()
 
 	wifiISR = interrupt.New(1, func(interrupt.Interrupt) {
-		C.espradio_call_saved_isr(1)
+		C.espradio_call_wifi_isr()
 		kickSched()
 	})
 	wifiISR.Enable()
+
+	C.espradio_prewire_wifi_interrupts()
 
 	C.espradio_event_register_default_cb()
 	C.espradio_set_blob_log_level(C.uint32_t(config.Logging))
@@ -157,6 +169,7 @@ func Enable(config Config) error {
 		return makeError(errCode)
 	}
 	C.espradio_wifi_init_completed()
+	C.espradio_netif_init_netstack_cb()
 
 	return nil
 }
@@ -407,16 +420,10 @@ func safeGosched() {
 
 //export espradio_task_yield_go
 func espradio_task_yield_go() {
-	for i := 0; i < 4; i++ {
-		if C.espradio_timer_poll_due(8) == 0 {
-			break
-		}
-	}
-	for i := 0; i < 4; i++ {
-		if C.espradio_esp_timer_poll_due(8) == 0 {
-			break
-		}
-	}
+	// Don't fire timers inline here — the blob calls task_yield from
+	// deep call stacks and the extra depth risks overflowing the
+	// goroutine stack.  Timer polling is handled by schedOnce() in
+	// the ticker goroutine on its own stack.
 	kickSched()
 	runtime.Gosched()
 }
@@ -636,14 +643,18 @@ type eventGroup struct {
 	bits uint32
 }
 
-func newEventGroup() *eventGroup {
-	return &eventGroup{}
-}
+var eventGroups [8]eventGroup
+var eventGroupInUse [8]uint32
 
 //export espradio_event_group_create
 func espradio_event_group_create() unsafe.Pointer {
-	eg := newEventGroup()
-	return unsafe.Pointer(eg)
+	for i := range eventGroups {
+		if atomic.CompareAndSwapUint32(&eventGroupInUse[i], 0, 1) {
+			eventGroups[i].bits = 0
+			return unsafe.Pointer(&eventGroups[i])
+		}
+	}
+	panic("espradio: too many event groups")
 }
 
 //export espradio_event_group_delete
@@ -652,6 +663,12 @@ func espradio_event_group_delete(ptr unsafe.Pointer) {
 	eg.mu.Lock()
 	eg.bits = 0
 	eg.mu.Unlock()
+	for i := range eventGroups {
+		if eg == &eventGroups[i] {
+			atomic.StoreUint32(&eventGroupInUse[i], 0)
+			return
+		}
+	}
 }
 
 //export espradio_event_group_set_bits
@@ -720,9 +737,9 @@ type semaphore struct {
 }
 
 var (
-	semaphores      [4]semaphore
-	semaphoreIndex  uint32
-	wifiThreadSemMu sync.Mutex
+	semaphores        [4]semaphore
+	semaphoreIndex    uint32
+	wifiThreadSemMu   sync.Mutex
 	wifiThreadSemByTH = map[unsafe.Pointer]*semaphore{}
 	wifiThreadSemNil  semaphore
 )
@@ -872,12 +889,12 @@ func (q *queue) length() uint32 {
 }
 
 var (
-	wifiQueueObj      *queue
-	wifiQueuePtr      unsafe.Pointer
-	wifiQueueHandle   unsafe.Pointer
-	queueMapMu        sync.Mutex
-	queueByAlias      = map[unsafe.Pointer]*queue{}
-	queueByHandle     = map[unsafe.Pointer]*queue{}
+	wifiQueueObj    *queue
+	wifiQueuePtr    unsafe.Pointer
+	wifiQueueHandle unsafe.Pointer
+	queueMapMu      sync.Mutex
+	queueByAlias    = map[unsafe.Pointer]*queue{}
+	queueByHandle   = map[unsafe.Pointer]*queue{}
 )
 
 func registerQueue(handle unsafe.Pointer, alias unsafe.Pointer, q *queue) {
