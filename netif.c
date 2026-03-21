@@ -40,6 +40,11 @@ static void blob_cb_noop(void) { }
 #define PP_WDEV_FUNCS_ENTRIES  196
 static uint32_t s_pp_wdev_save[PP_WDEV_FUNCS_ENTRIES];
 
+/* net80211_funcs relocation: same DMA corruption issue as pp_wdev_funcs.
+ * The blob allocates this table on the heap; we relocate to static .bss. */
+#define NET80211_FUNCS_MAX_ENTRIES  64
+static uint32_t s_net80211_funcs_save[NET80211_FUNCS_MAX_ENTRIES];
+
 /* Forward declaration — defined below. */
 static esp_err_t espradio_sta_rxcb(void *buffer, uint16_t len, void *eb);
 
@@ -106,6 +111,17 @@ void espradio_post_start_cb(void) {
             for (int i = 0; i < PP_WDEV_FUNCS_ENTRIES; i++)
                 s_pp_wdev_save[i] = heap_buf[i];
             pp_wdev_funcs = (volatile uint32_t *)s_pp_wdev_save;
+        }
+    }
+
+    /* Relocate net80211_funcs from the heap to static .bss. */
+    {
+        extern uint32_t *net80211_funcs;
+        if (net80211_funcs) {
+            uint32_t *heap_buf = net80211_funcs;
+            for (int i = 0; i < NET80211_FUNCS_MAX_ENTRIES; i++)
+                s_net80211_funcs_save[i] = heap_buf[i];
+            net80211_funcs = s_net80211_funcs_save;
         }
     }
 }
