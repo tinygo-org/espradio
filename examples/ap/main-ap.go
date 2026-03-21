@@ -1,3 +1,6 @@
+// This example shows how to set up an AP with a DHCP server. Connect to the AP with the SSID and password
+// defined in the ssid and password variables, and you should get an IP address in the 192.168.4.x range.
+// tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=YourSSID -X main.password=YourPassword" ./examples/ap
 package main
 
 import (
@@ -8,21 +11,26 @@ import (
 	"tinygo.org/x/espradio"
 )
 
+var (
+	ssid     string
+	password string
+)
+
 var dhcpServer dhcpv4.Server
 
 func main() {
 	time.Sleep(time.Second)
 
 	println("ap: enabling radio...")
-	if err := espradio.Enable(espradio.Config{Logging: espradio.LogLevelInfo}); err != nil {
+	if err := espradio.Enable(espradio.Config{Logging: espradio.LogLevelError}); err != nil {
 		println("ap: enable err:", err)
 		return
 	}
 
 	println("ap: starting AP...")
 	err := espradio.StartAP(espradio.APConfig{
-		SSID:     "espradio-ap",
-		Password: "",
+		SSID:     ssid,
+		Password: password,
 		Channel:  6,
 		AuthOpen: true,
 	})
@@ -44,7 +52,7 @@ func main() {
 
 	println("ap: creating lneto stack...")
 	stack, err := espradio.NewStack(nd, espradio.StackConfig{
-		Hostname:      "espradio-ap",
+		Hostname:      ssid,
 		StaticAddress: addr,
 		MaxUDPPorts:   2,
 	})
@@ -70,7 +78,7 @@ func main() {
 		return
 	}
 
-	println("ap: AP is running on", apIP, "— connect to espradio-ap")
+	println("ap: AP is running on", apIP, "- connect to", ssid)
 	go stackLoop(stack)
 	for {
 		time.Sleep(1 * time.Second)

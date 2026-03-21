@@ -1,3 +1,13 @@
+// This example shows how to create a simple HTTP server that serves a webpage with
+// a button to toggle an LED and a list of recent actions. The server keeps track of
+// the last 16 actions performed, including the callsign of the user who performed
+// the action and whether they turned the LED on or off. The webpage displays this
+// information in a list, along with how long ago each action was performed.
+// You can test it by connecting to the same Wi-Fi network as the ESP32 and
+// navigating to the IP address assigned to the ESP32 in your browser.
+// Click the "Toggle LED" button to see the LED state change and the action recorded on the webpage.
+//
+// tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=YourSSID -X main.password=YourPassword" -monitor -stack-size 8kb ./examples/http-app
 package main
 
 import (
@@ -16,10 +26,12 @@ import (
 	"tinygo.org/x/espradio"
 )
 
-const (
-	wifiSSID = "Kracozabra"
-	wifiPass = "09655455"
+var (
+	ssid     string
+	password string
+)
 
+const (
 	ntpHost    = "pool.ntp.org"
 	pollTime   = 5 * time.Millisecond
 	maxConns   = 4
@@ -36,6 +48,7 @@ var (
 )
 
 func setLED(lightOn bool) {
+	// commented out because the Xiao ESP32-C3 doesn't have an onboard LED.
 	// machine.LED.Set(lightOn)
 }
 
@@ -44,7 +57,7 @@ func main() {
 
 	println("initializing radio...")
 	err := espradio.Enable(espradio.Config{
-		Logging: espradio.LogLevelNone,
+		Logging: espradio.LogLevelError,
 	})
 	if err != nil {
 		println("could not enable radio:", err)
@@ -58,16 +71,16 @@ func main() {
 		return
 	}
 
-	println("connecting to", wifiSSID, "...")
+	println("connecting to", ssid, "...")
 	err = espradio.Connect(espradio.STAConfig{
-		SSID:     wifiSSID,
-		Password: wifiPass,
+		SSID:     ssid,
+		Password: password,
 	})
 	if err != nil {
 		println("connect failed:", err)
 		return
 	}
-	println("connected to", wifiSSID, "!")
+	println("connected to", ssid, "!")
 
 	println("starting L2 netdev...")
 	nd, err := espradio.StartNetDev()
@@ -78,7 +91,7 @@ func main() {
 
 	println("creating lneto stack...")
 	espstack, err := espradio.NewStack(nd, espradio.StackConfig{
-		Hostname:    "espradio",
+		Hostname:    ssid,
 		MaxUDPPorts: 2,
 		MaxTCPPorts: 1,
 	})
@@ -88,9 +101,7 @@ func main() {
 	}
 
 	// Start the poll loop in the background.
-	// VERY IMPORTANT TO START BEFORE USING STACK!
 	go loopForeverStack(espstack)
-
 	println("starting DHCP...")
 	dhcp, err := espstack.SetupWithDHCP(espradio.DHCPConfig{})
 	if err != nil {
@@ -146,7 +157,7 @@ func main() {
 		panic("listener register: " + err.Error())
 	}
 
-	print("listening", "http://"+listenAddr.String())
+	println("listening on", "http://"+listenAddr.String())
 	lstack.Debug("init-complete")
 
 	// Pre-allocate worker goroutines so stacks are allocated once at startup
