@@ -1,3 +1,5 @@
+// This example shows how to connect to a Wi-Fi network and get an IP address with DHCP.
+// tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=YourSSID -X main.password=YourPassword" ./examples/connect-and-dhcp
 package main
 
 import (
@@ -6,9 +8,9 @@ import (
 	"tinygo.org/x/espradio"
 )
 
-const (
-	wifiSSID = "yourssid"
-	wifiPass = "yourpassword"
+var (
+	ssid     string
+	password string
 )
 
 func main() {
@@ -30,16 +32,16 @@ func main() {
 		return
 	}
 
-	println("connecting to", wifiSSID, "...")
+	println("connecting to", ssid, "...")
 	err = espradio.Connect(espradio.STAConfig{
-		SSID:     wifiSSID,
-		Password: wifiPass,
+		SSID:     ssid,
+		Password: password,
 	})
 	if err != nil {
 		println("connect failed:", err)
 		return
 	}
-	println("connected to", wifiSSID, "!")
+	println("connected to", ssid, "!")
 
 	println("starting L2 netdev...")
 	nd, err := espradio.StartNetDev()
@@ -50,7 +52,7 @@ func main() {
 
 	println("creating lneto stack...")
 	stack, err := espradio.NewStack(nd, espradio.StackConfig{
-		Hostname:    "espradio",
+		Hostname:    ssid,
 		MaxUDPPorts: 2,
 		MaxTCPPorts: 1,
 	})

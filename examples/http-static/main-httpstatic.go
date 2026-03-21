@@ -1,3 +1,6 @@
+// This example shows how to create a simple HTTP server that serves a static webpage. The server listens for incoming HTTP requests and responds with the contents of the embedded `index.html` file. You can test it by connecting to the same Wi-Fi network as the ESP32 and navigating to the IP address assigned to the ESP32 in your browser.
+//
+// tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=YourSSID -X main.password=YourPassword" -monitor -stack-size 8kb ./examples/http-static
 package main
 
 import (
@@ -7,17 +10,18 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/soypat/cyw43439/examples/cywnet"
 	"github.com/soypat/lneto/http/httpraw"
 	"github.com/soypat/lneto/tcp"
 	"github.com/soypat/lneto/x/xnet"
 	"tinygo.org/x/espradio"
 )
 
-const (
-	wifiSSID = "Kracozabra"
-	wifiPass = "09655455"
+var (
+	ssid     string
+	password string
+)
 
+const (
 	pollTime   = 5 * time.Millisecond
 	maxConns   = 4
 	httpBuf    = 1024
@@ -53,16 +57,16 @@ func main() {
 		return
 	}
 
-	println("connecting to", wifiSSID, "...")
+	println("connecting to", ssid, "...")
 	err = espradio.Connect(espradio.STAConfig{
-		SSID:     wifiSSID,
-		Password: wifiPass,
+		SSID:     ssid,
+		Password: password,
 	})
 	if err != nil {
 		println("connect failed:", err)
 		return
 	}
-	println("connected to", wifiSSID, "!")
+	println("connected to", ssid, "!")
 
 	println("starting L2 netdev...")
 	nd, err := espradio.StartNetDev()
@@ -73,7 +77,7 @@ func main() {
 
 	println("creating lneto stack...")
 	espstack, err := espradio.NewStack(nd, espradio.StackConfig{
-		Hostname:    "espradio",
+		Hostname:    ssid,
 		MaxUDPPorts: 2,
 		MaxTCPPorts: 1,
 	})
@@ -121,7 +125,7 @@ func main() {
 	if err != nil {
 		panic("listener register:" + err.Error())
 	}
-	println("listening at", "http://"+listenAddr.String())
+	println("listening on", "http://"+listenAddr.String())
 
 	for {
 		if listener.NumberOfReadyToAccept() == 0 {
@@ -228,7 +232,7 @@ func handleConn(conn *tcp.Conn, hdr *httpraw.Header) {
 	// connection closed automatically by defer.
 }
 
-func loopForeverStack(stack *cywnet.Stack) {
+func loopForeverStack(stack *espradio.Stack) {
 	for {
 		send, recv, _ := stack.RecvAndSend()
 		if send == 0 && recv == 0 {
