@@ -28,9 +28,7 @@
  * our controlled init, and the blob's set_intr calls are no-ops. */
 void espradio_prewire_wifi_interrupts(void) {
     intr_matrix_set(0, ETS_WIFI_MAC_INTR_SOURCE, ESPRADIO_WIFI_CPU_INT);
-    intr_matrix_set(0, ETS_WIFI_MAC_NMI_SOURCE,  ESPRADIO_WIFI_CPU_INT);
     intr_matrix_set(0, ETS_WIFI_PWR_INTR_SOURCE, ESPRADIO_WIFI_CPU_INT);
-    intr_matrix_set(0, ETS_WIFI_BB_INTR_SOURCE,  ESPRADIO_WIFI_CPU_INT);
 }
 
 /* No-op: the blob calls set_intr to route peripheral sources to CPU
@@ -78,5 +76,28 @@ void espradio_wifi_int_to_level(void) {
     ESPRADIO_INTC_TYPE_REG   &= ~(1u << ESPRADIO_WIFI_CPU_INT);
     __asm__ volatile ("fence" ::: "memory");
     ESPRADIO_INTC_ENABLE_REG |=  (1u << ESPRADIO_WIFI_CPU_INT);
+}
+
+/* Raise WiFi CPU interrupt priority above the global threshold (5)
+ * so that hardware interrupts actually fire.  interrupt.Enable() sets
+ * priority to 5 which equals the threshold — not sufficient on ESP32-C3
+ * where the condition is priority > threshold. */
+void espradio_wifi_int_raise_priority(void) {
+    ESPRADIO_INTC_PRI_REG(ESPRADIO_WIFI_CPU_INT) = 6u;
+    __asm__ volatile ("fence" ::: "memory");
+}
+
+/* Called at the end of espradio_call_wifi_isr().  In level-triggered
+ * mode, mask CPU int 1 via the enable register to prevent re-entry
+ * if the hardware line is still asserted after the blob ISR ran.
+ * The bottom-half (schedOnce) unmasks after processing queued work. */
+void espradio_wifi_isr_post_mask(void) {
+    if ((ESPRADIO_INTC_TYPE_REG & (1u << ESPRADIO_WIFI_CPU_INT)) == 0) {
+        ESPRADIO_INTC_ENABLE_REG &= ~(1u << ESPRADIO_WIFI_CPU_INT);
+    }
+}
+
+void espradio_wifi_unmask(void) {
+    ESPRADIO_INTC_ENABLE_REG |= (1u << ESPRADIO_WIFI_CPU_INT);
 }
 

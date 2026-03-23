@@ -34,6 +34,9 @@ void espradio_call_saved_isr(int32_t n) {
  * we call every non-NULL entry in the WiFi source range (0-3) so that
  * no registered handler is missed regardless of which index the blob
  * chose.  Called from the Go interrupt handler for CPU interrupt 1. */
+__attribute__((weak))
+void espradio_wifi_isr_post_mask(void) {}
+
 void espradio_call_wifi_isr(void) {
     s_in_isr = 1;
     __asm__ volatile ("fence" ::: "memory");
@@ -44,6 +47,7 @@ void espradio_call_wifi_isr(void) {
     }
     __asm__ volatile ("fence" ::: "memory");
     s_in_isr = 0;
+    espradio_wifi_isr_post_mask();
 }
 
 bool espradio_is_from_isr(void) {
