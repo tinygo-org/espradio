@@ -102,16 +102,6 @@ func startSchedTicker() {
 }
 
 func schedOnce() {
-	// Poll the WiFi blob ISR to catch events where the hardware level
-	// stayed asserted but no new edge was generated.  This compensates
-	// for the edge-triggered interrupt mode losing events when the
-	// peripheral line never transitions low between assertions.
-	// Interrupts are disabled during the poll to prevent reentrant
-	// calls to the blob ISR from a real edge interrupt.
-	mask := interrupt.Disable()
-	C.espradio_call_wifi_isr()
-	interrupt.Restore(mask)
-
 	for C.espradio_isr_ring_tail() != C.espradio_isr_ring_head() {
 		idx := C.espradio_isr_ring_tail()
 		q := C.espradio_isr_ring_entry_queue(idx)
@@ -133,6 +123,8 @@ func schedOnce() {
 			break
 		}
 	}
+
+	C.espradio_wifi_unmask()
 }
 
 func kickSched() {
@@ -154,6 +146,7 @@ func Enable(config Config) error {
 		kickSched()
 	})
 	wifiISR.Enable()
+	C.espradio_wifi_int_raise_priority()
 
 	C.espradio_prewire_wifi_interrupts()
 
@@ -169,6 +162,8 @@ func Enable(config Config) error {
 		return makeError(errCode)
 	}
 	C.espradio_wifi_init_completed()
+	C.espradio_wifi_int_to_level()
+	schedOnce()
 	C.espradio_netif_init_netstack_cb()
 
 	return nil
