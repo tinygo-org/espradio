@@ -1,4 +1,4 @@
-update: esp-wifi/README.md
+update: update-esp-wifi
 	rm -rf blobs/headers
 	rm -rf blobs/include
 	rm -rf blobs/libs
@@ -7,5 +7,5 @@ update: esp-wifi/README.md
 	cp -rp esp-wifi/c/include      blobs
 	cp -rp esp-wifi/esp-wifi-sys-esp32c3/libs blobs/libs/esp32c3
 
-esp-wifi/README.md:
-	git clone https://github.com/esp-rs/esp-wifi
+update-esp-wifi:
+	cd esp-wifi && git pull --rebase origin main
