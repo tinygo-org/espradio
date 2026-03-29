@@ -9,12 +9,14 @@ import (
 	"tinygo.org/x/espradio"
 )
 
-// Netlinker is TinyGo's OSI L2 data link layer interface.  Network device
-// drivers implement Netlinker to expose the device's L2 functionality.
+const pollTime = 5 * time.Millisecond
 
+// Esplink implements the Netlinker interface for the ESP32-C3's WiFi interface, using the espradio package and an lneto Stack.
 type Esplink struct {
 	params   *nl.ConnectParams
 	notifyCb func(nl.Event)
+
+	netstack *espradio.Stack
 }
 
 // NetConnect device to network
@@ -49,17 +51,38 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 	}
 	println("connected to", params.Ssid, "!")
 
+	println("starting L2 netdev...")
+	nd, err := espradio.StartNetDev()
+	if err != nil {
+		println("netdev failed:", err)
+		return err
+	}
+
+	println("creating lneto stack...")
+	espstack, err := espradio.NewStack(nd, espradio.StackConfig{
+		Hostname:    params.Ssid,
+		MaxUDPPorts: 2,
+		MaxTCPPorts: 1,
+	})
+	if err != nil {
+		println("stack failed:", err)
+		return err
+	}
+
+	n.netstack = espstack
+
 	if n.notifyCb != nil {
 		n.notifyCb(nl.EventNetUp)
 	}
+
+	go handleStack(espstack)
 
 	return nil
 }
 
 // NetDisconnect device from network
 func (n *Esplink) NetDisconnect() {
-	// No-op: the blob doesn't have a concept of disconnecting from the network, and
-	// the blob's deinit is a no-op, so we don't have anything to do here.
+	// TODO: implement this.  For now, just do nothing and let the connection time out.
 }
 
 // NetNotify to register callback for network events
@@ -75,13 +98,44 @@ func (n *Esplink) GetHardwareAddr() (net.HardwareAddr, error) {
 // GetHostByName returns the IP address of either a hostname or IPv4
 // address in standard dot notation
 func (n *Esplink) GetHostByName(name string) (netip.Addr, error) {
-	return netip.Addr{}, nil
+	dhcp, err := n.netstack.SetupWithDHCP(espradio.DHCPConfig{})
+	if err != nil {
+		println("DHCP failed:", err)
+		return netip.Addr{}, err
+	}
+
+	lstack := n.netstack.LnetoStack()
+	rstack := lstack.StackRetrying(pollTime)
+	gatewayHW, err := rstack.DoResolveHardwareAddress6(dhcp.Router, 500*time.Millisecond, 4)
+	if err != nil {
+		println("ARP resolve failed: " + err.Error())
+		return netip.Addr{}, err
+	}
+	lstack.SetGateway6(gatewayHW)
+
+	addrs, err := rstack.DoLookupIP(name, 5*time.Second, 3)
+	if err != nil {
+		println("DNS lookup failed:", err)
+		return netip.Addr{}, err
+	}
+	if len(addrs) == 0 {
+		println("DNS lookup failed: no addresses found")
+		return netip.Addr{}, err
+	}
+
+	return addrs[0], nil
 }
 
 // Addr returns IP address assigned to the interface, either by
 // DHCP or statically
 func (n *Esplink) Addr() (netip.Addr, error) {
-	return netip.Addr{}, nil
+	dhcp, err := n.netstack.SetupWithDHCP(espradio.DHCPConfig{})
+	if err != nil {
+		println("DHCP failed:", err)
+		return netip.Addr{}, err
+	}
+
+	return dhcp.AssignedAddr, nil
 }
 
 // Berkely Sockets-like interface, Go-ified.  See man page for socket(2), etc.
@@ -117,4 +171,13 @@ func (n *Esplink) Close(sockfd int) error {
 
 func (n *Esplink) SetSockOpt(sockfd int, level int, opt int, value interface{}) error {
 	return nil
+}
+
+func handleStack(stack *espradio.Stack) {
+	for {
+		send, recv, _ := stack.RecvAndSend()
+		if send == 0 && recv == 0 {
+			time.Sleep(pollTime)
+		}
+	}
 }
