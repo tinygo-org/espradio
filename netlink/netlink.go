@@ -3,8 +3,10 @@ package netlink
 import (
 	"net"
 	"net/netip"
+	"sync"
 	"time"
 
+	"github.com/soypat/lneto/x/xnet"
 	nl "tinygo.org/x/drivers/netlink"
 	"tinygo.org/x/espradio"
 )
@@ -16,7 +18,13 @@ type Esplink struct {
 	params   *nl.ConnectParams
 	notifyCb func(nl.Event)
 
-	netstack *espradio.Stack
+	netstack  *espradio.Stack
+	berkeley  xnet.StackBerkeley
+	stackloop sync.Once
+}
+
+func (n *Esplink) rstack() xnet.StackRetrying {
+	return n.netstack.LnetoStack().StackRetrying(pollTime)
 }
 
 // NetConnect device to network
@@ -74,9 +82,33 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 	if n.notifyCb != nil {
 		n.notifyCb(nl.EventNetUp)
 	}
+	n.stackloop.Do(func() {
+		// Start stack goroutine once.
+		n.berkeley = n.netstack.LnetoStack().StackBlocking(pollTime).StackBerkeley(xnet.BerkeleyConfig{
+			ListenerPoolConfig: xnet.TCPPoolConfig{
+				PoolSize:           8,
+				QueueSize:          4,
+				TxBufSize:          1024,
+				RxBufSize:          1024,
+				EstablishedTimeout: 2 * time.Second,
+				ClosingTimeout:     2 * time.Second,
+			},
+		})
+		go handleStack(espstack)
+	})
+	err = n.doDHCP()
+	if err != nil {
+		return err
+	}
+	return nil
+}
 
-	go handleStack(espstack)
-
+func (n *Esplink) doDHCP() error {
+	_, err := n.netstack.SetupWithDHCP(espradio.DHCPConfig{})
+	if err != nil {
+		println("DHCP failed:", err)
+		return err
+	}
 	return nil
 }
 
@@ -92,56 +124,33 @@ func (n *Esplink) NetNotify(cb func(nl.Event)) {
 
 // GetHardwareAddr returns device MAC address
 func (n *Esplink) GetHardwareAddr() (net.HardwareAddr, error) {
-	return nil, nil
+	hw := n.netstack.LnetoStack().HardwareAddress()
+	return hw[:], nil
 }
 
 // GetHostByName returns the IP address of either a hostname or IPv4
 // address in standard dot notation
 func (n *Esplink) GetHostByName(name string) (netip.Addr, error) {
-	dhcp, err := n.netstack.SetupWithDHCP(espradio.DHCPConfig{})
-	if err != nil {
-		println("DHCP failed:", err)
-		return netip.Addr{}, err
-	}
-
-	lstack := n.netstack.LnetoStack()
-	rstack := lstack.StackRetrying(pollTime)
-	gatewayHW, err := rstack.DoResolveHardwareAddress6(dhcp.Router, 500*time.Millisecond, 4)
-	if err != nil {
-		println("ARP resolve failed: " + err.Error())
-		return netip.Addr{}, err
-	}
-	lstack.SetGateway6(gatewayHW)
-
+	rstack := n.rstack()
 	addrs, err := rstack.DoLookupIP(name, 5*time.Second, 3)
 	if err != nil {
 		println("DNS lookup failed:", err)
 		return netip.Addr{}, err
 	}
-	if len(addrs) == 0 {
-		println("DNS lookup failed: no addresses found")
-		return netip.Addr{}, err
-	}
-
 	return addrs[0], nil
 }
 
 // Addr returns IP address assigned to the interface, either by
 // DHCP or statically
 func (n *Esplink) Addr() (netip.Addr, error) {
-	dhcp, err := n.netstack.SetupWithDHCP(espradio.DHCPConfig{})
-	if err != nil {
-		println("DHCP failed:", err)
-		return netip.Addr{}, err
-	}
-
-	return dhcp.AssignedAddr, nil
+	return n.netstack.LnetoStack().Addr(), nil
 }
 
 // Berkely Sockets-like interface, Go-ified.  See man page for socket(2), etc.
 func (n *Esplink) Socket(domain int, stype int, protocol int) (int, error) {
 	return 0, nil
 }
+
 func (n *Esplink) Bind(sockfd int, ip netip.AddrPort) error {
 	return nil
 }
