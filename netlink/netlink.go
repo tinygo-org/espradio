@@ -36,32 +36,53 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 		return nl.ErrMissingSSID
 	}
 
+	if debug {
+		println("Esplink NetConnect: ssid:", params.Ssid)
+	}
+
 	err := espradio.Enable(espradio.Config{
 		Logging: espradio.LogLevelError,
 	})
 	if err != nil {
-		println("could not enable radio:", err)
+		if debug {
+			println("could not enable radio:", err)
+		}
 		return err
 	}
 
+	if debug {
+		println("Esplink NetConnect: starting radio")
+	}
 	err = espradio.Start()
 	if err != nil {
-		println("could not start radio:", err)
+		if debug {
+			println("could not start radio:", err)
+		}
 		return err
 	}
 
+	if debug {
+		println("Esplink NetConnect: connecting to WiFi")
+	}
 	err = espradio.Connect(espradio.STAConfig{
 		SSID:     params.Ssid,
 		Password: params.Passphrase,
 	})
 	if err != nil {
-		println("connect failed:", err)
+		if debug {
+			println("connect failed:", err)
+		}
 		return err
 	}
 
+	if debug {
+		println("Esplink NetConnect: connected to WiFi, starting stack")
+	}
 	nd, err := espradio.StartNetDev()
 	if err != nil {
-		println("netdev failed:", err)
+		if debug {
+			println("netdev failed:", err)
+		}
 		return err
 	}
 
@@ -71,7 +92,9 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 		MaxTCPPorts: 1,
 	})
 	if err != nil {
-		println("stack failed:", err)
+		if debug {
+			println("stack failed:", err)
+		}
 		return err
 	}
 
@@ -81,6 +104,9 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 		n.notifyCb(nl.EventNetUp)
 	}
 
+	if debug {
+		println("Esplink NetConnect: stack started")
+	}
 	n.stackloop.Do(func() {
 		// Start stack goroutine once.
 		gostack := n.netstack.LnetoStack().StackGo(pollTime, xnet.StackGoConfig{
@@ -98,7 +124,9 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 	})
 	err = n.doDHCP()
 	if err != nil {
-		println("debug: doDHCP failed:", err.Error())
+		if debug {
+			println("debug: doDHCP failed:", err.Error())
+		}
 		return err
 	}
 	return nil
@@ -107,7 +135,9 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 func (n *Esplink) doDHCP() error {
 	_, err := n.netstack.SetupWithDHCP(espradio.DHCPConfig{})
 	if err != nil {
-		println("DHCP failed:", err)
+		if debug {
+			println("DHCP failed:", err)
+		}
 		return err
 	}
 	return nil
@@ -125,6 +155,9 @@ func (n *Esplink) NetNotify(cb func(nl.Event)) {
 
 // GetHardwareAddr returns device MAC address
 func (n *Esplink) GetHardwareAddr() (net.HardwareAddr, error) {
+	if debug {
+		println("GetHardwareAddr")
+	}
 	hw := n.netstack.LnetoStack().HardwareAddress()
 	return hw[:], nil
 }
@@ -132,19 +165,29 @@ func (n *Esplink) GetHardwareAddr() (net.HardwareAddr, error) {
 // GetHostByName returns the IP address of either a hostname or IPv4
 // address in standard dot notation
 func (n *Esplink) GetHostByName(name string) (netip.Addr, error) {
+	if debug {
+		println("GetHostByName:", name)
+	}
 	if len(name) == 0 {
+		if debug {
+			println("GetHostByName: empty name")
+		}
 		return netip.Addr{}, errors.New("empty name")
 	} else if name[0] >= '0' && name[0] <= '9' {
 		// Special case to try for IPv4 addresses.
 		addr, err := netip.ParseAddr(name)
-		if err == nil {
-			return addr, nil
+		if err != nil {
+			return netip.Addr{}, err
 		}
+
+		return addr, nil
 	}
 	rstack := n.rstack()
 	addrs, err := rstack.DoLookupIP(name, 5*time.Second, 3)
 	if err != nil {
-		println("DNS lookup failed:", err)
+		if debug {
+			println("DNS lookup failed:", err)
+		}
 		return netip.Addr{}, err
 	}
 	return addrs[0], nil
@@ -153,43 +196,82 @@ func (n *Esplink) GetHostByName(name string) (netip.Addr, error) {
 // Addr returns IP address assigned to the interface, either by
 // DHCP or statically
 func (n *Esplink) Addr() (netip.Addr, error) {
+	if debug {
+		println("Addr")
+	}
 	return n.netstack.LnetoStack().Addr(), nil
 }
 
 // Berkely Sockets-like interface, Go-ified.  See man page for socket(2), etc.
 func (n *Esplink) Socket(domain int, stype int, protocol int) (int, error) {
+	if debug {
+		println("Socket:", domain, stype, protocol)
+	}
+
 	return n.berkeley.Socket(domain, stype, protocol)
 }
 
 func (n *Esplink) Bind(sockfd int, ip netip.AddrPort) error {
+	if debug {
+		println("Bind: sockfd", sockfd, "ip", ip.String())
+	}
+
 	return n.berkeley.Bind(sockfd, ip)
 }
 
 func (n *Esplink) Connect(sockfd int, host string, ip netip.AddrPort) error {
+	if debug {
+		println("Connect: sockfd", sockfd, "host", host, "ip", ip.String())
+	}
+
 	return n.berkeley.Connect(sockfd, host, ip)
 }
 
 func (n *Esplink) Listen(sockfd int, backlog int) error {
+	if debug {
+		println("Listen: sockfd", sockfd, "backlog", backlog)
+	}
+
 	return n.berkeley.Listen(sockfd, backlog)
 }
 
 func (n *Esplink) Accept(sockfd int) (int, netip.AddrPort, error) {
+	if debug {
+		println("Accept: sockfd", sockfd)
+	}
+
 	return n.berkeley.Accept(sockfd)
 }
 
 func (n *Esplink) Send(sockfd int, buf []byte, flags int, deadline time.Time) (int, error) {
+	if debug {
+		println("Send: sockfd", sockfd, "len", len(buf), "flags", flags, "deadline", deadline.String())
+	}
+
 	return n.berkeley.Send(sockfd, buf, flags, deadline)
 }
 
 func (n *Esplink) Recv(sockfd int, buf []byte, flags int, deadline time.Time) (int, error) {
+	if debug {
+		println("Recv: sockfd", sockfd, "len", len(buf), "flags", flags, "deadline", deadline.String())
+	}
+
 	return n.berkeley.Recv(sockfd, buf, flags, deadline)
 }
 
 func (n *Esplink) Close(sockfd int) error {
+	if debug {
+		println("Close: sockfd", sockfd)
+	}
+
 	return n.berkeley.Close(sockfd)
 }
 
 func (n *Esplink) SetSockOpt(sockfd int, level int, opt int, value interface{}) error {
+	if debug {
+		println("SetSockOpt: sockfd", sockfd, "level", level, "opt", opt, "value", value)
+	}
+	
 	return n.berkeley.SetSockOpt(sockfd, level, opt, value)
 }
 
