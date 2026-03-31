@@ -44,7 +44,7 @@ func main() {
 	params := "name=" + url.QueryEscape(name) + "&" +
 		"occupation=" + url.QueryEscape(occupation)
 
-	path := fmt.Sprintf("https://httpbin.org/get?%s", params)
+	path := fmt.Sprintf("http://httpbin.org/get?%s", params)
 
 	cnt := 0
 	for {
