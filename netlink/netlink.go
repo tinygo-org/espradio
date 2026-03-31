@@ -1,6 +1,7 @@
 package netlink
 
 import (
+	"errors"
 	"net"
 	"net/netip"
 	"sync"
@@ -132,6 +133,15 @@ func (n *Esplink) GetHardwareAddr() (net.HardwareAddr, error) {
 // GetHostByName returns the IP address of either a hostname or IPv4
 // address in standard dot notation
 func (n *Esplink) GetHostByName(name string) (netip.Addr, error) {
+	if len(name) == 0 {
+		return netip.Addr{}, errors.New("empty name")
+	} else if name[0] >= '0' && name[0] <= '9' {
+		// Special case to try for IPv4 addresses.
+		addr, err := netip.ParseAddr(name)
+		if err == nil {
+			return addr, nil
+		}
+	}
 	rstack := n.rstack()
 	addrs, err := rstack.DoLookupIP(name, 5*time.Second, 3)
 	if err != nil {

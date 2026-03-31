@@ -13,15 +13,15 @@ import (
 	"strconv"
 	"time"
 
-	link "tinygo.org/x/espradio/netlink"
 	"tinygo.org/x/drivers/netdev"
 	nl "tinygo.org/x/drivers/netlink"
+	link "tinygo.org/x/espradio/netlink"
 )
 
 var (
-	ssid string
+	ssid     string
 	password string
-	port string = ":80"
+	port     string = ":80"
 )
 
 func main() {
@@ -46,7 +46,10 @@ func main() {
 	http.HandleFunc("/off", LED_OFF)
 	http.HandleFunc("/on", LED_ON)
 
-	err = http.ListenAndServe(port, nil)
+	h, _ := link.Addr()
+	host := h.String()
+	fmt.Printf("HTTP server listening on http://%s%s\r\n", host, port)
+	err = http.ListenAndServe(host+port, nil)
 	for err != nil {
 		fmt.Printf("error: %s\r\n", err.Error())
 		time.Sleep(5 * time.Second)
