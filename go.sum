@@ -1,2 +1,4 @@
-github.com/soypat/lneto v0.0.0-20260317193600-493446244feb h1:exO/9+gHhKz1KrRAFmhICUhUW21OWpDnVzufWyIAnJ4=
-github.com/soypat/lneto v0.0.0-20260317193600-493446244feb/go.mod h1:g/8Lk+hIsMZydyWDJjK2YfsCuG6jA5mWCO6U+4S7w1U=
+github.com/soypat/lneto v0.0.0-20260331170330-22f29fdfb1f8 h1:7FhoPo/ggO7W/L14rPa+uyNSl9eBnG1ToOHEU/Cv/io=
+github.com/soypat/lneto v0.0.0-20260331170330-22f29fdfb1f8/go.mod h1:g/8Lk+hIsMZydyWDJjK2YfsCuG6jA5mWCO6U+4S7w1U=
+tinygo.org/x/drivers v0.34.0 h1:lw8ePJeUSn9oICKBvQXHC9TIE+J00OfXfkGTrpXM9Iw=
+tinygo.org/x/drivers v0.34.0/go.mod h1:ZdErNrApSABdVXjA1RejD67R8SNRI6RKVfYgQDZtKtk=
