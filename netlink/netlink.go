@@ -44,14 +44,12 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 		return err
 	}
 
-	println("starting radio...")
 	err = espradio.Start()
 	if err != nil {
 		println("could not start radio:", err)
 		return err
 	}
 
-	println("connecting to", params.Ssid, "...")
 	err = espradio.Connect(espradio.STAConfig{
 		SSID:     params.Ssid,
 		Password: params.Passphrase,
@@ -60,16 +58,13 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 		println("connect failed:", err)
 		return err
 	}
-	println("connected to", params.Ssid, "!")
 
-	println("starting L2 netdev...")
 	nd, err := espradio.StartNetDev()
 	if err != nil {
 		println("netdev failed:", err)
 		return err
 	}
 
-	println("creating lneto stack...")
 	espstack, err := espradio.NewStack(nd, espradio.StackConfig{
 		Hostname:    params.Ssid,
 		MaxUDPPorts: 2,
@@ -81,14 +76,12 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 	}
 
 	n.netstack = espstack
-	println("debug: stack created ok")
 
 	if n.notifyCb != nil {
 		n.notifyCb(nl.EventNetUp)
 	}
-	println("debug: before stackloop.Do")
+
 	n.stackloop.Do(func() {
-		println("debug: creating StackGo...")
 		// Start stack goroutine once.
 		gostack := n.netstack.LnetoStack().StackGo(pollTime, xnet.StackGoConfig{
 			ListenerPoolConfig: xnet.TCPPoolConfig{
@@ -100,18 +93,14 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 				ClosingTimeout:     2 * time.Second,
 			},
 		})
-		println("debug: creating BerkeleyStack...")
 		n.berkeley = *xnet.NewBerkeleyStack(gostack.Socket)
-		println("debug: starting handleStack goroutine...")
 		go handleStack(espstack)
 	})
-	println("debug: before doDHCP")
 	err = n.doDHCP()
 	if err != nil {
 		println("debug: doDHCP failed:", err.Error())
 		return err
 	}
-	println("debug: doDHCP done")
 	return nil
 }
 
@@ -175,6 +164,7 @@ func (n *Esplink) Socket(domain int, stype int, protocol int) (int, error) {
 func (n *Esplink) Bind(sockfd int, ip netip.AddrPort) error {
 	return n.berkeley.Bind(sockfd, ip)
 }
+
 func (n *Esplink) Connect(sockfd int, host string, ip netip.AddrPort) error {
 	return n.berkeley.Connect(sockfd, host, ip)
 }
