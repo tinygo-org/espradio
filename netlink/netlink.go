@@ -6,8 +6,10 @@ import (
 	"net/netip"
 	"sync"
 	"time"
+	"runtime"
 
 	"github.com/soypat/lneto/x/xnet"
+
 	nl "tinygo.org/x/drivers/netlink"
 	"tinygo.org/x/espradio"
 )
@@ -79,29 +81,37 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 	}
 
 	n.netstack = espstack
+	println("debug: stack created ok")
 
 	if n.notifyCb != nil {
 		n.notifyCb(nl.EventNetUp)
 	}
+	println("debug: before stackloop.Do")
 	n.stackloop.Do(func() {
+		println("debug: creating StackGo...")
 		// Start stack goroutine once.
 		gostack := n.netstack.LnetoStack().StackGo(pollTime, xnet.StackGoConfig{
 			ListenerPoolConfig: xnet.TCPPoolConfig{
-				PoolSize:           8,
+				PoolSize:           2,
 				QueueSize:          4,
-				TxBufSize:          1024,
+				TxBufSize:          4096,
 				RxBufSize:          1024,
 				EstablishedTimeout: 2 * time.Second,
 				ClosingTimeout:     2 * time.Second,
 			},
 		})
+		println("debug: creating BerkeleyStack...")
 		n.berkeley = *xnet.NewBerkeleyStack(gostack.Socket)
+		println("debug: starting handleStack goroutine...")
 		go handleStack(espstack)
 	})
+	println("debug: before doDHCP")
 	err = n.doDHCP()
 	if err != nil {
+		println("debug: doDHCP failed:", err.Error())
 		return err
 	}
+	println("debug: doDHCP done")
 	return nil
 }
 
@@ -198,6 +208,7 @@ func handleStack(stack *espradio.Stack) {
 		send, recv, _ := stack.RecvAndSend()
 		if send == 0 && recv == 0 {
 			time.Sleep(pollTime)
+			runtime.Gosched()
 		}
 	}
 }
