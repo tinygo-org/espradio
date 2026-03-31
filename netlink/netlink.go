@@ -224,6 +224,19 @@ func (n *Esplink) Connect(sockfd int, host string, ip netip.AddrPort) error {
 		println("Connect: sockfd", sockfd, "host", host, "ip", ip.String())
 	}
 
+	// TinyGo's DialTLS passes the hostname in `host` with an invalid/zero IP,
+	// expecting the netdev to resolve it.
+	if (!ip.Addr().IsValid() || ip.Addr().IsUnspecified()) && host != "" {
+		resolved, err := n.GetHostByName(host)
+		if err != nil {
+			return err
+		}
+		ip = netip.AddrPortFrom(resolved, ip.Port())
+		if debug {
+			println("Connect: resolved", host, "to", ip.String())
+		}
+	}
+
 	return n.berkeley.Connect(sockfd, host, ip)
 }
 
@@ -271,7 +284,7 @@ func (n *Esplink) SetSockOpt(sockfd int, level int, opt int, value interface{}) 
 	if debug {
 		println("SetSockOpt: sockfd", sockfd, "level", level, "opt", opt, "value", value)
 	}
-	
+
 	return n.berkeley.SetSockOpt(sockfd, level, opt, value)
 }
 
