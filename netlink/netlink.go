@@ -84,7 +84,7 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 	}
 	n.stackloop.Do(func() {
 		// Start stack goroutine once.
-		n.berkeley = n.netstack.LnetoStack().StackBlocking(pollTime).StackBerkeley(xnet.BerkeleyConfig{
+		gostack := n.netstack.LnetoStack().StackGo(pollTime, xnet.StackGoConfig{
 			ListenerPoolConfig: xnet.TCPPoolConfig{
 				PoolSize:           8,
 				QueueSize:          4,
@@ -94,6 +94,7 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 				ClosingTimeout:     2 * time.Second,
 			},
 		})
+		n.berkeley = *xnet.NewBerkeleyStack(gostack.Socket)
 		go handleStack(espstack)
 	})
 	err = n.doDHCP()
@@ -148,38 +149,38 @@ func (n *Esplink) Addr() (netip.Addr, error) {
 
 // Berkely Sockets-like interface, Go-ified.  See man page for socket(2), etc.
 func (n *Esplink) Socket(domain int, stype int, protocol int) (int, error) {
-	return 0, nil
+	return n.berkeley.Socket(domain, stype, protocol)
 }
 
 func (n *Esplink) Bind(sockfd int, ip netip.AddrPort) error {
-	return nil
+	return n.berkeley.Bind(sockfd, ip)
 }
 func (n *Esplink) Connect(sockfd int, host string, ip netip.AddrPort) error {
-	return nil
+	return n.berkeley.Connect(sockfd, host, ip)
 }
 
 func (n *Esplink) Listen(sockfd int, backlog int) error {
-	return nil
+	return n.berkeley.Listen(sockfd, backlog)
 }
 
 func (n *Esplink) Accept(sockfd int) (int, netip.AddrPort, error) {
-	return 0, netip.AddrPort{}, nil
+	return n.berkeley.Accept(sockfd)
 }
 
 func (n *Esplink) Send(sockfd int, buf []byte, flags int, deadline time.Time) (int, error) {
-	return 0, nil
+	return n.berkeley.Send(sockfd, buf, flags, deadline)
 }
 
 func (n *Esplink) Recv(sockfd int, buf []byte, flags int, deadline time.Time) (int, error) {
-	return 0, nil
+	return n.berkeley.Recv(sockfd, buf, flags, deadline)
 }
 
 func (n *Esplink) Close(sockfd int) error {
-	return nil
+	return n.berkeley.Close(sockfd)
 }
 
 func (n *Esplink) SetSockOpt(sockfd int, level int, opt int, value interface{}) error {
-	return nil
+	return n.berkeley.SetSockOpt(sockfd, level, opt, value)
 }
 
 func handleStack(stack *espradio.Stack) {
