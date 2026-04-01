@@ -1,0 +1,28 @@
+name: Build
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/tinygo-org/tinygo-dev
+      options: --user root
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install QEMU
+        run: apt-get update && apt-get install -y qemu-system-misc
+      - name: TinyGo version check
+        run: tinygo version
+      - name: Enforce Go Formatted Code
+        run: make fmt-check
+      - name: Run unit tests
+        run: |
+            go env -w GOFLAGS=-buildvcs=false
+            make unit-test
