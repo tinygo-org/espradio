@@ -1,0 +1,4 @@
+{
+    "inherits": ["riscv-qemu"],
+    "build-tags": ["esp32c3_qemu_target"]
+}
