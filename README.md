@@ -2,11 +2,15 @@
 
 TinyGo package for using the radio onboard ESP32 for wireless communication. Work in progress.
 
+Already functions on the `esp32c3` processor for WiFi communication. More processors coming soon!
+
+Bluetooth is still in progress.
+
 ## Examples
 
 ### ap
 
-Shows how to set up a WiFi access point with a DHCP server.
+Shows how to set up a WiFi access point with a DHCP server using the low-level lneto interface.
 
 ```
 $ tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=tinygoap -X main.password=YourPasswordHere" -monitor -stack-size 8kb ./examples/ap
@@ -33,7 +37,7 @@ ap: rx_cb= 0 rx_drop= 0
 
 ### connect-and-dhcp
 
-Connects to a Wi-Fi network and gets an IP address with DHCP.
+Connects to a Wi-Fi network and gets an IP address with DHCP using the low-level lneto interface.
 
 ```
 $ tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=yourssid -X main.password=YourPasswordHere" -monitor -stack-size 8kb ./examples/connect-and-dhcp
@@ -63,7 +67,7 @@ alive
 
 ### http-app
 
-Connects to a WiFi access point, calls NTP to obtain the current date/time, then serves a tiny web application.
+Connects to a WiFi access point, calls NTP to obtain the current date/time, then serves a tiny web application using the low-level lneto interface.
 
 ```
 $ tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=yourssid -X main.password=YourPasswordHere" -monitor -stack-size 8kb ./examples/http-app/
@@ -91,7 +95,7 @@ listening on http://192.168.1.46:80
 
 ### http-static
 
-Minimal HTTP server that serves a static webpage.
+Minimal HTTP server that serves a static webpage using the low-level lneto interface.
 
 ```
 $ tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=yourssid -X main.password=YourPasswordHere" -monitor -stack-size 8kb ./examples/http-static/
@@ -113,6 +117,41 @@ listening on http://192.168.1.46:80
 incoming connection: 192.168.1.223 from port 53636
 incoming connection: 192.168.1.223 from port 53640
 Got webpage request!
+```
+
+### mqtt
+
+Uses the MQTT machine to machine protocol to publish and subscribe to messages with the test.mosquitto.org server. Uses the Go stdlib and the [`natiu-mqtt`](github.com/soypat/natiu-mqtt) package with the `netlink` interface.
+
+```
+$ tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=yourssid -X main.password=yourpassword" -size short -monitor ./examples/mqtt
+code    data     bss |   flash     ram
+698122   22700  273178 |  720822  295878
+Connected to ESP32-C3
+Flashing: 720928/720928 bytes (100%)
+Connected to /dev/ttyACM0. Press Ctrl-C to exit.
+load:0x4202c6f0,len:0x83900
+SHA-256 comparison failed:
+Calculated: b7e1d566962176bdc79440051ce901ce1e70a5a236d48f82e83684edef7ccfeb
+Expected: 74ff2b47841741b35f58f4091f4da93d7e613fbde43fbc082967d06752da3804
+Attempting to boot anyway...
+entry 0x4039828c
+Connecting to WiFi...
+Connected to WiFi.
+ClientId: tinygo-client-TJMEVOCXRJ
+Connecting to MQTT broker at test.mosquitto.org:1883
+Subscribed to topic cpu/freq
+Message 160.00Mhz received on topic cpu/freq
+Message 160.00Mhz received on topic cpu/freq
+Message 160.00Mhz received on topic cpu/freq
+Message 160.00Mhz received on topic cpu/freq
+Message 160.00Mhz received on topic cpu/freq
+Message 160.00Mhz received on topic cpu/freq
+Message 160.00Mhz received on topic cpu/freq
+Message 160.00Mhz received on topic cpu/freq
+Message 160.00Mhz received on topic cpu/freq
+Message 160.00Mhz received on topic cpu/freq
+Disconnected from MQTT broker.
 ```
 
 ### scan
@@ -143,6 +182,27 @@ AP: rems RSSI -79
 ### starting
 
 Starts the ESP32 radio.
+
+### webserver
+
+Runs a webserver using the Go `net/http` package using the `netlink` interface:
+
+```
+$ tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=yourssid -X main.password=yourpassword" -stack-size 8kb -monitor ./examples/webserver/
+Connected to ESP32-C3
+Flashing: 953984/953984 bytes (100%)
+Connected to /dev/ttyACM0. Press Ctrl-C to exit.
+load:0x403918e4,len:0xa474
+load:0x42037c0c,len:0xb1248
+SHA-256 comparison failed:
+Calculated: 87698da75b5f09de7723e8650f1c84416180cfad80a2800e1adeb04c6d6f2087
+Expected:
+2ca7343abec2d068cbb8f39247e44d8aca94e5f0b78f623c7b7eb8981d8499cc
+Attempting to boot anyway...
+entry 0x4039bd14
+Connecting to WiFi...
+HTTP server listening on http://192.168.1.46:80
+```
 
 ## Updating `esp-wifi-sys`
 
