@@ -4,9 +4,9 @@ import (
 	"errors"
 	"net"
 	"net/netip"
+	"runtime"
 	"sync"
 	"time"
-	"runtime"
 
 	"github.com/soypat/lneto/x/xnet"
 

@@ -16,7 +16,7 @@ import (
 )
 
 var (
-	ssid string
+	ssid     string
 	password string
 )
 
@@ -35,7 +35,6 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-
 
 	println("Connected. Getting URL...")
 	name := "John Doe"
