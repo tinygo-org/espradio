@@ -18,10 +18,10 @@ import (
 )
 
 var (
-	ssid   string
-	password   string
-	broker string = "test.mosquitto.org:1883"
-	topic  string = "cpu/freq"
+	ssid     string
+	password string
+	broker   string = "test.mosquitto.org:1883"
+	topic    string = "cpu/freq"
 )
 
 func main() {
