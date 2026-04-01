@@ -1,3 +1,9 @@
+fmt-check:
+	test -z "$(shell gofmt -l .)"
+
+unit-test:
+	tinygo test -target=esp32c3-qemu.json ./...
+
 update: update-esp-wifi
 	rm -rf blobs/headers
 	rm -rf blobs/include
