@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"machine"
 	"math/rand"
 	"net"
 	"time"
@@ -20,8 +19,8 @@ import (
 var (
 	ssid     string
 	password string
-	broker   string = "test.mosquitto.org:1883"
-	topic    string = "cpu/freq"
+	broker   string = "broker.hivemq.com:1883"
+	topic    string = "cpu/usage"
 )
 
 func main() {
@@ -34,12 +33,24 @@ func main() {
 	clientId := "tinygo-client-" + randomString(10)
 	fmt.Printf("ClientId: %s\n", clientId)
 
-	// Get a transport for MQTT packets
+	// Get a transport for MQTT packets.
+	// Retry TCP connection since public brokers may reject/close connections under load.
 	fmt.Printf("Connecting to MQTT broker at %s\n", broker)
-	conn, err := net.Dial("tcp", broker)
-	if err != nil {
-		log.Fatal(err)
+	var conn net.Conn
+	for attempt := range 5 {
+		var err error
+		conn, err = net.Dial("tcp", broker)
+		if err != nil {
+			fmt.Printf("net.Dial attempt %d failed: %s\n", attempt+1, err)
+			time.Sleep(2 * time.Second)
+			continue
+		}
+		break
 	}
+	if conn == nil {
+		log.Fatal("all TCP connection attempts failed")
+	}
+	fmt.Printf("TCP connected to %v\n", conn.RemoteAddr())
 	defer conn.Close()
 
 	// Create new client
@@ -55,11 +66,14 @@ func main() {
 	// Connect client
 	var varconn mqtt.VariablesConnect
 	varconn.SetDefaultMQTT([]byte(clientId))
+	varconn.KeepAlive = 60 // seconds; some brokers reject KeepAlive=0
+	fmt.Println("Sending MQTT CONNECT...")
 	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
-	err = client.Connect(ctx, conn, &varconn)
+	err := client.Connect(ctx, conn, &varconn)
 	if err != nil {
 		log.Fatal("failed to connect: ", err)
 	}
+	fmt.Println("MQTT CONNECT succeeded")
 
 	// Subscribe to topic
 	ctx, _ = context.WithTimeout(context.Background(), 10*time.Second)
@@ -85,8 +99,7 @@ func main() {
 			log.Fatal("client disconnected: ", client.Err())
 		}
 
-		freq := float32(machine.CPUFrequency()) / 1000000
-		payload := fmt.Sprintf("%.02fMhz", freq)
+		payload := fmt.Sprintf("Random value: %d", randomInt(0, 100))
 
 		pubVar.PacketIdentifier++
 		err = client.PublishPayload(pubFlags, pubVar, []byte(payload))
