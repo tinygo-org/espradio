@@ -1,8 +1,8 @@
 # espradio
 
-TinyGo package for using the radio onboard ESP32 for wireless communication. Work in progress.
+TinyGo package for using the ESP32 onboard radio for wireless communication.
 
-Already functions on the `esp32c3` and `esp32s3` processors for WiFi communication. More processors coming soon!
+Already works on the `esp32c3` and `esp32s3` processors for WiFi. More processors coming soon!
 
 Bluetooth is still in progress.
 
@@ -13,22 +13,23 @@ Bluetooth is still in progress.
 Shows how to set up a WiFi access point with a DHCP server using the low-level lneto interface.
 
 ```
-$ tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=tinygoap -X main.password=YourPasswordHere" -monitor -stack-size 8kb ./examples/ap
+$ tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=tinygoap -X main.password=YourPasswordHere" -monitor ./examples/ap
+   code    data     bss |   flash     ram
+ 582004   21988  257010 |  603992  278998
 Connected to ESP32-C3
-Flashing: 581584/581584 bytes (100%)
+Flashing: 604096/604096 bytes (100%)
 Connected to /dev/ttyACM0. Press Ctrl-C to exit.
 SHA-256 comparison failed:
-Calculated: dfa22060430ed9033cf25f30ff9d91d940f32fbbf2fffe1abbaec4cd0f8e7389
-Expected: 6d9b75f1612e777d952efe3be8dc8cf33d2b9db4314d8cbfddf6d25a01b9c9cb
+Calculated: 8d1512da059d76b08bbfe99c14ab43d792466ee8fd85a365b338a6ad17aa1e2a
+Expected: 06fd1290b7002c716ccf8a9df263fb33d5e22b6892e08038cb6a8e8f6b04be5f
 Attempting to boot anyway...
-entry 0x40394dc8
+entry 0x40398b3c
 ap: enabling radio...
 ap: starting AP...
 ap: starting L2 netdev (AP)...
 ap: creating lneto stack...
 ap: configuring DHCP server...
-ap: AP is running on 192.168.4.1 - connect to tinygoap
-ap: rx_cb= 0 rx_drop= 0
+ap: AP is running on 192.168.4.1 - connect to tinygo-ap
 ap: rx_cb= 0 rx_drop= 0
 ap: rx_cb= 0 rx_drop= 0
 ap: rx_cb= 0 rx_drop= 0
@@ -40,15 +41,17 @@ ap: rx_cb= 0 rx_drop= 0
 Connects to a Wi-Fi network and gets an IP address with DHCP using the low-level lneto interface.
 
 ```
-$ tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=yourssid -X main.password=YourPasswordHere" -monitor -stack-size 8kb ./examples/connect-and-dhcp
-Connected to ESP32-C3
-Flashing: 578032/578032 bytes (100%)
+$ tinygo flash -target xiao-esp32s3 -ldflags="-X main.ssid=yourssid -X main.password=YourPasswordHere" -monitor ./examples/connect-and-dhcp
+   code    data     bss |   flash     ram
+ 574233   22304  259184 |  596537  281488
+Connected to ESP32-S3
+Flashing: 596640/596640 bytes (100%)
 Connected to /dev/ttyACM0. Press Ctrl-C to exit.
 SHA-256 comparison failed:
-Calculated: ac0c75a476a9dc3469142d5191d87eb30b499eb61356567eebc1f524e2d4188b
-Expected: 330af5651f0cca07a494b68ab84b5631c68a10f9bd2e5568f7145eb7efcc5a9d
+Calculated: 84318f99e1f97b458c8a4afc3237908a2d5be760b42c66b39c03367a96e2ae32
+Expected: c3a26bf70f12f0ffc686e708a86b10548920a08e166a0b14d9e2a8f80e662d2e
 Attempting to boot anyway...
-entry 0x40394c20
+entry 0x4038688c
 initializing radio...
 starting radio...
 connecting to rems ...
@@ -56,7 +59,7 @@ connected to rems !
 starting L2 netdev...
 creating lneto stack...
 starting DHCP...
-got IP: 192.168.1.46
+got IP: 192.168.1.241
 gateway: 192.168.1.1
 DNS: 192.168.1.1
 done!
@@ -70,7 +73,7 @@ alive
 Connects to a WiFi access point, calls NTP to obtain the current date/time, then serves a tiny web application using the low-level lneto interface.
 
 ```
-$ tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=yourssid -X main.password=YourPasswordHere" -monitor -stack-size 8kb ./examples/http-app/
+$ tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=yourssid -X main.password=YourPasswordHere" -monitor ./examples/http-app/
 Connected to ESP32-C3
 Flashing: 652848/652848 bytes (100%)
 Connected to /dev/ttyACM0. Press Ctrl-C to exit.
@@ -98,7 +101,7 @@ listening on http://192.168.1.46:80
 Minimal HTTP server that serves a static webpage using the low-level lneto interface.
 
 ```
-$ tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=yourssid -X main.password=YourPasswordHere" -monitor -stack-size 8kb ./examples/http-static/
+$ tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=yourssid -X main.password=YourPasswordHere" -monitor 8kb ./examples/http-static/
 Connected to ESP32-C3
 Flashing: 627504/627504 bytes (100%)
 Connected to /dev/ttyACM0. Press Ctrl-C to exit.
@@ -124,33 +127,37 @@ Got webpage request!
 Uses the MQTT machine to machine protocol to publish and subscribe to messages with the test.mosquitto.org server. Uses the Go stdlib and the [`natiu-mqtt`](github.com/soypat/natiu-mqtt) package with the `netlink` interface.
 
 ```
-$ tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=yourssid -X main.password=yourpassword" -size short -monitor ./examples/mqtt
-code    data     bss |   flash     ram
-698122   22700  273178 |  720822  295878
+$ tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=yourssid -X main.password=yourpassword" -size short -monitor ./examples/mqtt/
+   code    data     bss |   flash     ram
+ 701066   22700  279290 |  723766  301990
+
 Connected to ESP32-C3
-Flashing: 720928/720928 bytes (100%)
-Connected to /dev/ttyACM0. Press Ctrl-C to exit.
-load:0x4202c6f0,len:0x83900
+Flashing: 723872/723872 bytes (100%)               
+Connected to /dev/ttyACM0. Press Ctrl-C to exit.                                                          
+load:0x4202c860,len:0x84310
 SHA-256 comparison failed:
-Calculated: b7e1d566962176bdc79440051ce901ce1e70a5a236d48f82e83684edef7ccfeb
-Expected: 74ff2b47841741b35f58f4091f4da93d7e613fbde43fbc082967d06752da3804
-Attempting to boot anyway...
-entry 0x4039828c
-Connecting to WiFi...
-Connected to WiFi.
-ClientId: tinygo-client-TJMEVOCXRJ
-Connecting to MQTT broker at test.mosquitto.org:1883
-Subscribed to topic cpu/freq
-Message 160.00Mhz received on topic cpu/freq
-Message 160.00Mhz received on topic cpu/freq
-Message 160.00Mhz received on topic cpu/freq
-Message 160.00Mhz received on topic cpu/freq
-Message 160.00Mhz received on topic cpu/freq
-Message 160.00Mhz received on topic cpu/freq
-Message 160.00Mhz received on topic cpu/freq
-Message 160.00Mhz received on topic cpu/freq
-Message 160.00Mhz received on topic cpu/freq
-Message 160.00Mhz received on topic cpu/freq
+Calculated: 6bc25eb465fa7599f460725ba7ca7550c86094cb2addfb1fe513499539e0bdd5                                                                                                                                        
+Expected: c4e21f71423096b6072c04d6e2e0c1c8809ea7dc92c5394e6ebba6a0dea25a79                                                                                                                                          
+Attempting to boot anyway...              
+entry 0x40398dc4                          
+Connecting to WiFi... 
+Connected to WiFi.                   
+ClientId: tinygo-client-BFEIHFDOCT   
+Connecting to MQTT broker at broker.hivemq.com:1883
+TCP connected to 35.157.137.172:1883
+Sending MQTT CONNECT...                                                                                   
+MQTT CONNECT succeeded                                                                                    
+Subscribed to topic cpu/usage                                                                             
+Message Random value: 45 received on topic cpu/usage                                                      
+Message Random value: 54 received on topic cpu/usage
+Message Random value: 62 received on topic cpu/usage
+Message Random value: 41 received on topic cpu/usage
+Message Random value: 68 received on topic cpu/usage
+Message Random value: 36 received on topic cpu/usage
+Message Random value: 22 received on topic cpu/usage
+Message Random value: 73 received on topic cpu/usage
+Message Random value: 27 received on topic cpu/usage
+Message Random value: 86 received on topic cpu/usage                                                      
 Disconnected from MQTT broker.
 ```
 
@@ -159,7 +166,7 @@ Disconnected from MQTT broker.
 Scans for WiFi access points.
 
 ```
-$ tinygo flash -target xiao-esp32c3 -monitor -stack-size 8kb ./examples/scan
+$ tinygo flash -target xiao-esp32c3 -monitor ./examples/scan
 Connected to ESP32-C3
 Flashing: 442736/442736 bytes (100%)
 Connected to /dev/ttyACM0. Press Ctrl-C to exit.
