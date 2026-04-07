@@ -6,6 +6,7 @@ package espradio
 #cgo CFLAGS: -Iblobs/headers
 #cgo CFLAGS: -DCONFIG_SOC_WIFI_NAN_SUPPORT=0
 #cgo CFLAGS: -DESPRADIO_PHY_PATCH_ROMFUNCS=0
+#cgo CFLAGS: -fno-short-enums
 
 #include "espradio.h"
 */
@@ -97,11 +98,32 @@ func startSchedTicker() {
 			case <-isrKick:
 			}
 			schedOnce()
+			runtime.Gosched()
 		}
 	}()
 }
 
+var wifiInitDone uint32
+
 func schedOnce() {
+	// Mask WiFi CPU interrupt before the ISR softcall.  On Xtensa (ESP32-S3)
+	// the WiFi interrupt is level-triggered at level 1.  If the MAC asserts
+	// its interrupt while we're already iterating the ISR handlers below,
+	// the hardware ISR preempts us and re-entrantly calls the blob's ISR
+	// handler, corrupting its state and crashing.  Masking first prevents
+	// this; espradio_wifi_unmask() at the end re-enables the interrupt.
+	C.espradio_ints_off(C.uint32_t(1 << wifiCPUInterrupt))
+
+	// Restore ROM pointers BEFORE any blob code runs.  The blob reads
+	// pTxRx, pp_wdev_funcs etc. during ISR/queue/timer processing below.
+	C.espradio_restore_rom_ptrs()
+
+	// Poll WiFi ISR: work around missing hardware interrupt on ESP32-S3.
+	// Only poll after init is complete (blob ISR not registered until then).
+	if atomic.LoadUint32(&wifiInitDone) != 0 {
+		C.espradio_call_wifi_isr()
+	}
+
 	for C.espradio_isr_ring_tail() != C.espradio_isr_ring_head() {
 		idx := C.espradio_isr_ring_tail()
 		q := C.espradio_isr_ring_entry_queue(idx)
@@ -124,6 +146,10 @@ func schedOnce() {
 		}
 	}
 
+	// Restore critical ROM pointer variables that WiFi DMA may have
+	// corrupted (pTxRx, our_tx_eb, our_wait_eb, lmacConfMib_ptr).
+	C.espradio_restore_rom_ptrs()
+
 	C.espradio_wifi_unmask()
 }
 
@@ -134,17 +160,24 @@ func kickSched() {
 	}
 }
 
+// arenaPool keeps the arena backing memory reachable from Go so the GC
+// won't collect it.  The WiFi blob stores pointers into this pool in ROM
+// BSS (outside the GC's scan range), so individual malloc'd objects would
+// be collected.  One large pool kept alive by this global is safe.
+var arenaPool []byte
+
 // Enable and configure the radio.
 func Enable(config Config) error {
+	// Allocate arena pool from Go heap and hand it to C.
+	arenaPool = make([]byte, arenaPoolSize)
+	C.espradio_arena_init((*C.uint8_t)(unsafe.Pointer(&arenaPool[0])), C.size_t(arenaPoolSize))
+
 	startSchedTicker()
 	time.Sleep(schedTickerMs * time.Millisecond)
 	initHardware()
 	C.espradio_ensure_osi_ptr()
 
-	wifiISR = interrupt.New(1, func(interrupt.Interrupt) {
-		C.espradio_call_wifi_isr()
-		kickSched()
-	})
+	wifiISR = interrupt.New(wifiCPUInterrupt, wifiISRHandler)
 	wifiISR.Enable()
 	C.espradio_wifi_int_raise_priority()
 
@@ -163,6 +196,7 @@ func Enable(config Config) error {
 	}
 	C.espradio_wifi_init_completed()
 	C.espradio_wifi_int_to_level()
+	atomic.StoreUint32(&wifiInitDone, 1)
 	schedOnce()
 	C.espradio_netif_init_netstack_cb()
 
@@ -182,11 +216,37 @@ func Start() error {
 		}
 	}
 
+	C.espradio_set_country_eu_manual()
+
 	if code := C.espradio_esp_wifi_start(); code != C.ESP_OK {
 		return makeError(code)
 	}
 
+	// Disable modem-sleep power management.  The blob's default
+	// WIFI_PS_MIN_MODEM fires PM timer callbacks (pm_dream, pm_go_to_wake,
+	// etc.) that call ppCheckTxConnTrafficIdle.  Under cooperative scheduling
+	// the TX frame queues may be in an inconsistent state when those PM
+	// callbacks run, causing NULL-pointer crashes in ppCheckIsConnTraffic.
+	C.esp_wifi_set_ps(C.WIFI_PS_NONE)
+
+	// The blob's esp_wifi_start posts a START command to ppTask's queue
+	// and returns.  espradio_esp_wifi_start already called post_start_cb
+	// which relocates heap tables.  Now pump the scheduler so ppTask
+	// processes START (calls pp_attach, ppInitTxq, etc.) and the critical
+	// ROM pointer variables (pTxRx, our_tx_eb, …) get initialised.
+	for i := 0; i < 40; i++ {
+		schedOnce()
+		runtime.Gosched()
+	}
+	// Snapshot the ROM pointers now that they are valid.
+	C.espradio_save_rom_ptrs()
+
 	return nil
+}
+
+// DebugISRCount returns the number of WiFi ISR invocations (for debugging).
+func DebugISRCount() uint32 {
+	return uint32(C.espradio_get_wifi_isr_count())
 }
 
 // Scan performs a single Wi-Fi scan pass and returns the list of discovered access points.
@@ -269,6 +329,13 @@ func Connect(cfg STAConfig) error {
 	select {
 	case res := <-connectResult:
 		if res.Connected {
+			// The blob fires WIFI_EVENT_STA_CONNECTED before its internal
+			// TX path (ppCheckIsConnTraffic) is fully initialized.  Pump the
+			// scheduler to let the blob finish setup before callers try to TX.
+			for i := 0; i < 20; i++ {
+				schedOnce()
+				time.Sleep(10 * time.Millisecond)
+			}
 			return nil
 		}
 		return makeError(C.esp_err_t(res.Reason))
@@ -281,6 +348,7 @@ func Connect(cfg STAConfig) error {
 func espradio_on_wifi_event(eventID int32, data unsafe.Pointer) {
 	switch eventID {
 	case C.WIFI_EVENT_STA_CONNECTED:
+		C.espradio_netif_set_connected(1)
 		ev := (*C.wifi_event_sta_connected_t)(data)
 		ssidLen := int(ev.ssid_len)
 		if ssidLen > 32 {
@@ -298,6 +366,7 @@ func espradio_on_wifi_event(eventID int32, data unsafe.Pointer) {
 		}
 
 	case C.WIFI_EVENT_STA_DISCONNECTED:
+		C.espradio_netif_set_connected(0)
 		ev := (*C.wifi_event_sta_disconnected_t)(data)
 		connectMu.Lock()
 		ch := connectResult
@@ -791,6 +860,7 @@ func espradio_semphr_take(semphr unsafe.Pointer, block_time_tick uint32) int32 {
 		timeout = time.Duration(block_time_tick) * time.Millisecond
 	}
 
+	iters := 0
 	for {
 		if semTryTake(sem) {
 			return 1
@@ -798,6 +868,7 @@ func espradio_semphr_take(semphr unsafe.Pointer, block_time_tick uint32) int32 {
 		if !forever && time.Since(start) >= timeout {
 			return 0
 		}
+		iters++
 		safeGosched()
 	}
 }

@@ -17,11 +17,15 @@ import "C"
 
 import (
 	"device/esp"
+	"runtime/interrupt"
 
 	_ "tinygo.org/x/espradio/esp32c3"
 )
 
 // ─── Hardware init ───────────────────────────────────────────────────────────
+
+// CPU interrupt number for WiFi MAC. On RISC-V, interrupt 1 is valid.
+const wifiCPUInterrupt = 1
 
 func initHardware() error {
 	// See:
@@ -58,3 +62,14 @@ func initHardware() error {
 // This is the value used for the ESP32-C3, see:
 // https://github.com/esp-rs/esp-wifi/blob/v0.2.0/esp-wifi/src/timer/riscv.rs#L28
 const ticksPerSecond = 16_000_000
+
+// C3 has only 321KB DRAM total; keep the arena pool small.
+const arenaPoolSize = 32 * 1024
+
+// ESP32-C3 (RISC-V): call the blob's WiFi ISR directly from the
+// hardware interrupt handler.  On RISC-V the interrupt context can
+// safely call the blob's ISR without stack overflow concerns.
+func wifiISRHandler(interrupt.Interrupt) {
+	C.espradio_call_wifi_isr()
+	kickSched()
+}

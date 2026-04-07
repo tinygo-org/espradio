@@ -41,9 +41,45 @@ static void blob_cb_noop(void) { }
 static uint32_t s_pp_wdev_save[PP_WDEV_FUNCS_ENTRIES];
 
 /* net80211_funcs relocation: same DMA corruption issue as pp_wdev_funcs.
- * The blob allocates this table on the heap; we relocate to static .bss. */
-#define NET80211_FUNCS_MAX_ENTRIES  64
+ * The blob allocates this table on the heap; we relocate to static .bss.
+ * net80211_funcs_init writes ~44 entries; 128 provides safe headroom. */
+#define NET80211_FUNCS_MAX_ENTRIES  128
 static uint32_t s_net80211_funcs_save[NET80211_FUNCS_MAX_ENTRIES];
+
+/* g_phyFuns relocation: the PHY function table lives at a fixed DRAM address
+ * (0x3fcef3d4, size 0x298 = 166 words) that can be corrupted at runtime —
+ * entries are overwritten with arena allocation addresses, causing
+ * InstructionFetchError when the PHY calibration timer reads temperature.
+ * Relocate to static .bss after init and redirect g_phyFuns. */
+#define PHY_FUNCS_TABLE_WORDS  166
+static uint32_t s_phyFuns_save[PHY_FUNCS_TABLE_WORDS];
+extern void *g_phyFuns;
+
+/* ppCheckTxConnTrafficIdle is called only by PM timer callbacks (pm_dream,
+ * pm_go_to_wake, pm_send_probe_stop, pm_update_params, etc.).  It walks
+ * TX frame descriptors in the lmac/pTxRx pools, which live in SRAM2 and
+ * may be in an inconsistent state under cooperative scheduling (the blob
+ * expects ppTask to run preemptively and finalise frame descriptors before
+ * PM callbacks access them).  With WIFI_PS_NONE the return value is
+ * irrelevant — wrap it to always return 0 ("idle") and avoid the crash. */
+int __wrap_ppCheckTxConnTrafficIdle(void) { return 0; }
+
+/* ROM-fixed pointer variables in the 0x3fcef9xx region that are critical for
+ * TX operations.  WiFi DMA can corrupt these the same way it corrupts
+ * pp_wdev_funcs.  We snapshot them after the blob finishes init and restore
+ * before every schedOnce / TX to prevent stale-DMA-induced crashes. */
+extern volatile uint32_t *pTxRx;       /* 0x3fcef954 – set by pp_attach */
+extern volatile uint32_t *our_tx_eb;   /* 0x3fcef948 */
+extern volatile uint32_t *our_wait_eb; /* 0x3fcef94c */
+extern volatile uint32_t *lmacConfMib_ptr; /* 0x3fcef950 */
+extern wifi_osi_funcs_t *g_osi_funcs_p;   /* 0x3fcef940 */
+
+static uint32_t s_saved_pTxRx;
+static uint32_t s_saved_our_tx_eb;
+static uint32_t s_saved_our_wait_eb;
+static uint32_t s_saved_lmacConfMib_ptr;
+static uint32_t s_saved_g_osi_funcs_p;
+static int      s_rom_ptrs_saved;
 
 /* Forward declaration — defined below. */
 static esp_err_t espradio_sta_rxcb(void *buffer, uint16_t len, void *eb);
@@ -74,6 +110,12 @@ void espradio_netif_init_netstack_cb(void) {
     esp_wifi_internal_reg_netstack_buf_cb(netstack_buf_ref_noop,
                                           netstack_buf_free_noop);
     espradio_patch_blob_cb_vars();
+    
+    /* Missing initialization steps required before esp_wifi_start() */
+    esp_wifi_set_mode(WIFI_MODE_NULL);
+    esp_wifi_set_tx_done_cb(espradio_tx_done_noop);
+    esp_wifi_internal_reg_rxcb(WIFI_IF_STA, espradio_sta_rxcb);
+    esp_wifi_internal_reg_rxcb(WIFI_IF_AP, espradio_sta_rxcb);
 }
 
 /* Called after esp_wifi_start(): re-patch any DRAM variables that
@@ -91,7 +133,6 @@ void espradio_post_start_cb(void) {
 
     /* Check whether the blob moved g_osi_funcs_p away from our table. */
     extern wifi_osi_funcs_t espradio_osi_funcs;
-    extern wifi_osi_funcs_t *g_osi_funcs_p;
     extern wifi_osi_funcs_t g_wifi_osi_funcs;
     extern wifi_osi_funcs_t *s_heap_osi_funcs;
 
@@ -124,6 +165,47 @@ void espradio_post_start_cb(void) {
             net80211_funcs = s_net80211_funcs_save;
         }
     }
+
+    /* Relocate g_phyFuns table from fixed DRAM to static .bss. */
+    if (g_phyFuns) {
+        uint32_t *rom_table = (uint32_t *)g_phyFuns;
+        for (int i = 0; i < PHY_FUNCS_TABLE_WORDS; i++)
+            s_phyFuns_save[i] = rom_table[i];
+        g_phyFuns = s_phyFuns_save;
+    }
+}
+
+/* Snapshot the critical ROM pointers after the blob has fully initialised
+ * them (pp_attach sets pTxRx, lmacInit sets lmacConfMib_ptr, etc.).
+ * Called from Go after pumping schedOnce enough times for ppTask to
+ * process the START command. */
+void espradio_save_rom_ptrs(void) {
+    s_saved_pTxRx          = (uint32_t)(uintptr_t)pTxRx;
+    s_saved_our_tx_eb      = (uint32_t)(uintptr_t)our_tx_eb;
+    s_saved_our_wait_eb    = (uint32_t)(uintptr_t)our_wait_eb;
+    s_saved_lmacConfMib_ptr = (uint32_t)(uintptr_t)lmacConfMib_ptr;
+    s_saved_g_osi_funcs_p  = (uint32_t)(uintptr_t)g_osi_funcs_p;
+    s_rom_ptrs_saved = 1;
+}
+
+/* Restore the ROM pointers from snapshot.  Called from schedOnce (Go side)
+ * and before every TX to undo any DMA corruption in the ROM data area. */
+void espradio_restore_rom_ptrs(void) {
+    if (!s_rom_ptrs_saved) return;
+    if ((uint32_t)(uintptr_t)pTxRx != s_saved_pTxRx)
+        pTxRx = (volatile uint32_t *)(uintptr_t)s_saved_pTxRx;
+    if ((uint32_t)(uintptr_t)our_tx_eb != s_saved_our_tx_eb)
+        our_tx_eb = (volatile uint32_t *)(uintptr_t)s_saved_our_tx_eb;
+    if ((uint32_t)(uintptr_t)our_wait_eb != s_saved_our_wait_eb)
+        our_wait_eb = (volatile uint32_t *)(uintptr_t)s_saved_our_wait_eb;
+    if ((uint32_t)(uintptr_t)lmacConfMib_ptr != s_saved_lmacConfMib_ptr)
+        lmacConfMib_ptr = (volatile uint32_t *)(uintptr_t)s_saved_lmacConfMib_ptr;
+    if ((uint32_t)(uintptr_t)g_osi_funcs_p != s_saved_g_osi_funcs_p)
+        g_osi_funcs_p = (wifi_osi_funcs_t *)(uintptr_t)s_saved_g_osi_funcs_p;
+    /* esp_phy_enable resets g_phyFuns to the fixed DRAM address on every call.
+     * Redirect it back to our static copy. */
+    if (g_phyFuns != s_phyFuns_save && s_phyFuns_save[0] != 0)
+        g_phyFuns = s_phyFuns_save;
 }
 
 #define ESPRADIO_NETIF_RXRING_SIZE  8
@@ -158,6 +240,11 @@ static esp_err_t espradio_sta_rxcb(void *buffer, uint16_t len, void *eb) {
 }
 
 static wifi_interface_t s_active_if = WIFI_IF_STA;
+static volatile int s_sta_connected;
+
+void espradio_netif_set_connected(int connected) {
+    s_sta_connected = connected;
+}
 
 esp_err_t espradio_netif_start_rx(int ap_mode) {
     s_active_if = ap_mode ? WIFI_IF_AP : WIFI_IF_STA;
@@ -180,6 +267,8 @@ uint16_t espradio_netif_rx_pop(void *dst, uint16_t dst_len) {
 }
 
 int espradio_netif_tx(void *buf, uint16_t len) {
+    if (!s_sta_connected) return ESP_ERR_WIFI_NOT_CONNECT;
+    espradio_restore_rom_ptrs();
     return esp_wifi_internal_tx(s_active_if, buf, len);
 }
 
