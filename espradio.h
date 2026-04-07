@@ -4,6 +4,7 @@
 
 /* ===== Go → C (implemented in top-level .c files) ===== */
 void espradio_arena_init(uint8_t *base, size_t cap);
+void espradio_arena_stats(uint32_t *used, uint32_t *capacity);
 void espradio_set_blob_log_level(uint32_t level);
 esp_err_t espradio_wifi_init(void);
 void espradio_wifi_init_completed(void);
