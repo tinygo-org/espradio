@@ -1,6 +1,7 @@
 package espradio
 
 /*
+#cgo CFLAGS: -fno-short-enums
 #include "include.h"
 */
 import "C"

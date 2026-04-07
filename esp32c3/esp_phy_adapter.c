@@ -352,7 +352,7 @@ void phy_ant_clr_update_flag(void) {
  * Handles calibration, PLL tracking and antenna configuration.
  * Power/clock domain is controlled via esp_wifi_bt_power_domain_on().
  */
-void esp_phy_enable(uint32_t modem) {
+void esp_phy_enable(esp_phy_modem_t modem) {
     espradio_phy_lock();
     uint32_t modem_flags = phy_get_modem_flag();
     PHY_ADAPTER_DBG("espradio: esp_phy_enable modem=%lu flags=%lu calibrated=%u\n",
@@ -380,7 +380,7 @@ void esp_phy_enable(uint32_t modem) {
 /* High-level entry point used by IDF to disable PHY for a modem
  * and power down RF / clocks when the last modem is turned off.
  */
-void esp_phy_disable(uint32_t modem) {
+void esp_phy_disable(esp_phy_modem_t modem) {
     espradio_phy_lock();
     phy_clr_modem_flag(modem);
     if (phy_get_modem_flag() == 0u) {

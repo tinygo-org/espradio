@@ -15,9 +15,7 @@ func main() {
 	time.Sleep(time.Second)
 
 	println("initializing radio...")
-	err := espradio.Enable(espradio.Config{
-		Logging: espradio.LogLevelError,
-	})
+	err := espradio.Enable(espradio.Config{})
 	if err != nil {
 		println("could not enable radio:", err)
 		return

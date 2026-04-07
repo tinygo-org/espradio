@@ -3,6 +3,7 @@
 #include "include.h"
 
 /* ===== Go → C (implemented in top-level .c files) ===== */
+void espradio_arena_init(uint8_t *base, size_t cap);
 void espradio_set_blob_log_level(uint32_t level);
 esp_err_t espradio_wifi_init(void);
 void espradio_wifi_init_completed(void);
@@ -18,6 +19,7 @@ void espradio_ensure_osi_ptr(void);
 void espradio_coex_adapter_init(void);
 void espradio_call_saved_isr(int32_t n);
 void espradio_call_wifi_isr(void);
+uint32_t espradio_get_wifi_isr_count(void);
 void espradio_prewire_wifi_interrupts(void);
 void espradio_wifi_int_to_level(void);
 void espradio_wifi_int_raise_priority(void);
@@ -49,10 +51,13 @@ extern esp_err_t esp_wifi_connect_internal(void);
 /* ===== netif (netif.c) ===== */
 void      espradio_netif_init_netstack_cb(void);
 void      espradio_post_start_cb(void);
+void      espradio_save_rom_ptrs(void);
+void      espradio_restore_rom_ptrs(void);
 esp_err_t espradio_netif_start_rx(int ap_mode);
 int       espradio_netif_rx_available(void);
 uint16_t  espradio_netif_rx_pop(void *dst, uint16_t dst_len);
 int       espradio_netif_tx(void *buf, uint16_t len);
+void      espradio_netif_set_connected(int connected);
 esp_err_t espradio_netif_get_mac(uint8_t mac[6]);
 uint32_t  espradio_netif_rx_cb_count(void);
 uint32_t  espradio_netif_rx_cb_drop(void);
@@ -72,9 +77,9 @@ extern void espradio_hal_reset_wifi_mac_go(void);
 extern int espradio_hal_read_mac_go(unsigned char *mac, unsigned int iftype);
 extern void espradio_on_wifi_event(int32_t eventID, void *data);
 
-/* ===== esp32c3/ → linker (implemented in esp32c3/ *.c) ===== */
-extern void esp_phy_enable(uint32_t modem);
-extern void esp_phy_disable(uint32_t modem);
+/* ===== chip-specific → linker (implemented in esp32c3/ or esp32s3/ *.c) ===== */
+extern void esp_phy_enable(esp_phy_modem_t modem);
+extern void esp_phy_disable(esp_phy_modem_t modem);
 
 // Interrupt controller / ISR helpers.
 void intr_matrix_set(uint32_t cpu_no, uint32_t model_num, uint32_t intr_num);

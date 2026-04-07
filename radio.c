@@ -2,6 +2,7 @@
 #include "espradio.h"
 #include "soc/interrupts.h"
 #include <string.h>
+#include <stddef.h>
 
 #ifndef ESPRADIO_RADIO_DEBUG
 #define ESPRADIO_RADIO_DEBUG 0
@@ -39,8 +40,6 @@ extern char gChmCxt[252];               /* libnet80211.a: channel manager contex
 extern void phy_get_romfunc_addr(void);
 extern void *g_phyFuns;
 extern wifi_osi_funcs_t *g_osi_funcs_p;
-extern int rtc_get_reset_reason(int cpu_no);
-
 /* Stub for the WIFI_INIT_CONFIG_DEFAULT() macro; also kept filled as fallback. */
 wifi_osi_funcs_t g_wifi_osi_funcs = {0};
 
@@ -119,12 +118,121 @@ void espradio_rom_hooks_init(void) {
     ets_install_lock(ets_intr_lock, ets_intr_unlock);
 }
 
+/* Disable ALL watchdog timers so that if the CPU hangs or faults, we get
+ * an exception vector (captured in RTC STORE) instead of a Super WDT
+ * full-SoC reset that clears the RTC domain.  Each WDT requires unlocking
+ * its write-protect register first.
+ *
+ * Also disable the clock glitch detector and power glitch detector.
+ * The WiFi radio TX causes EMI/power noise that trips these detectors,
+ * resulting in a GLITCH_RTC_RESET (reset_reason=19) that wipes the
+ * entire RTC domain.  ESP-IDF disables these during normal startup. */
+static void espradio_disable_all_wdt(void) {
+#ifdef __XTENSA__
+    /* --- Clock glitch detector --- */
+    /* RTC_CNTL_ANA_CONF_REG = 0x60008034, bit 20 = GLITCH_RST_EN */
+    *(volatile uint32_t *)0x60008034 &= ~(1u << 20);        /* GLITCH_RST_EN=0 */
+
+    /* --- FIB_SEL: override eFuse with register values --- */
+    /* RTC_CNTL_FIB_SEL_REG = 0x60008148, bits[2:0]:
+     *   When bit=1, eFuse value overrides register → can't disable via register
+     *   When bit=0, register value is used → our GLITCH_RST_EN=0 takes effect
+     * Default=0x7 (all eFuse), ESP-IDF sets 0x1.  Set 0x0 to force all to register. */
+    *(volatile uint32_t *)0x60008148 = 0x0;
+
+    /* --- Power glitch detector --- */
+    /* RTC_CNTL_PG_CTRL_REG = 0x60008144, bit 31 = POWER_GLITCH_EN */
+    *(volatile uint32_t *)0x60008144 &= ~(1u << 31);        /* POWER_GLITCH_EN=0 */
+
+    /* --- Brownout detector --- */
+    /* RTC_CNTL_BROWN_OUT_REG = 0x600080E8, bit 30 = ENA, bit 26 = RST_ENA */
+    *(volatile uint32_t *)0x600080E8 &= ~((1u << 30) | (1u << 26));  /* disable BOD + BOD reset */
+
+    /* --- Super WDT (SWD) --- */
+    /* RTC_CNTL_SWD_WPROTECT_REG = 0x600080B8, key = 0x8F1D312A */
+    /* RTC_CNTL_SWD_CONF_REG     = 0x600080B4, bit 30 = SWD_DISABLE */
+    *(volatile uint32_t *)0x600080B8 = 0x8F1D312A;          /* unlock */
+    *(volatile uint32_t *)0x600080B4 |= (1u << 30);         /* SWD_DISABLE=1 */
+    *(volatile uint32_t *)0x600080B8 = 0;                   /* re-lock */
+
+    /* --- RTC WDT --- */
+    /* RTC_CNTL_WDTWPROTECT_REG = 0x600080B0, key = 0x50D83AA1 */
+    /* RTC_CNTL_WDTCONFIG0_REG  = 0x60008098, bit 31 = WDT_EN */
+    *(volatile uint32_t *)0x600080B0 = 0x50D83AA1;          /* unlock */
+    *(volatile uint32_t *)0x60008098 &= ~(1u << 31);        /* WDT_EN=0 */
+    *(volatile uint32_t *)0x600080B0 = 0;                   /* re-lock */
+
+    /* --- Timer Group 0 MWDT --- */
+    /* TIMG_WDTWPROTECT_REG(0) = 0x6001F064, key = 0x50D83AA1 */
+    /* TIMG_WDTCONFIG0_REG(0)  = 0x6001F048, bit 31 = WDT_EN */
+    *(volatile uint32_t *)0x6001F064 = 0x50D83AA1;          /* unlock */
+    *(volatile uint32_t *)0x6001F048 &= ~(1u << 31);        /* WDT_EN=0 */
+    *(volatile uint32_t *)0x6001F064 = 0;                   /* re-lock */
+
+    /* --- Timer Group 1 MWDT --- */
+    /* TIMG_WDTWPROTECT_REG(1) = 0x60020064, key = 0x50D83AA1 */
+    /* TIMG_WDTCONFIG0_REG(1)  = 0x60020048, bit 31 = WDT_EN */
+    *(volatile uint32_t *)0x60020064 = 0x50D83AA1;          /* unlock */
+    *(volatile uint32_t *)0x60020048 &= ~(1u << 31);        /* WDT_EN=0 */
+    *(volatile uint32_t *)0x60020064 = 0;                   /* re-lock */
+
+#else /* RISC-V (ESP32-C3) — different RTC_CNTL offsets, same TIMG offsets */
+
+    /* --- Clock glitch detector --- */
+    *(volatile uint32_t *)0x60008034 &= ~(1u << 20);        /* GLITCH_RST_EN=0 */
+    /* RTC_CNTL_FIB_SEL_REG = 0x6000810C */
+    *(volatile uint32_t *)0x6000810C = 0x0;                 /* force register values */
+
+    /* --- Power glitch detector --- */
+    /* RTC_CNTL_PG_CTRL_REG = 0x60008124 */
+    *(volatile uint32_t *)0x60008124 &= ~(1u << 31);        /* POWER_GLITCH_EN=0 */
+
+    /* --- Brownout detector --- */
+    /* RTC_CNTL_BROWN_OUT_REG = 0x600080D8 */
+    *(volatile uint32_t *)0x600080D8 &= ~((1u << 30) | (1u << 26));
+
+    /* --- Super WDT (SWD) --- */
+    /* RTC_CNTL_SWD_WPROTECT_REG = 0x600080B0, key = 0x8F1D312A */
+    /* RTC_CNTL_SWD_CONF_REG     = 0x600080AC, bit 30 = SWD_DISABLE */
+    *(volatile uint32_t *)0x600080B0 = 0x8F1D312A;          /* unlock */
+    *(volatile uint32_t *)0x600080AC |= (1u << 30);         /* SWD_DISABLE=1 */
+    *(volatile uint32_t *)0x600080B0 = 0;                   /* re-lock */
+
+    /* --- RTC WDT --- */
+    /* RTC_CNTL_WDTWPROTECT_REG = 0x600080A8, key = 0x50D83AA1 */
+    /* RTC_CNTL_WDTCONFIG0_REG  = 0x60008090, bit 31 = WDT_EN */
+    *(volatile uint32_t *)0x600080A8 = 0x50D83AA1;          /* unlock */
+    *(volatile uint32_t *)0x60008090 &= ~(1u << 31);        /* WDT_EN=0 */
+    *(volatile uint32_t *)0x600080A8 = 0;                   /* re-lock */
+
+    /* --- Timer Group 0 MWDT --- */
+    *(volatile uint32_t *)0x6001F064 = 0x50D83AA1;          /* unlock */
+    *(volatile uint32_t *)0x6001F048 &= ~(1u << 31);        /* WDT_EN=0 */
+    *(volatile uint32_t *)0x6001F064 = 0;                   /* re-lock */
+
+    /* --- Timer Group 1 MWDT --- */
+    *(volatile uint32_t *)0x60020064 = 0x50D83AA1;          /* unlock */
+    *(volatile uint32_t *)0x60020048 &= ~(1u << 31);        /* WDT_EN=0 */
+    *(volatile uint32_t *)0x60020064 = 0;                   /* re-lock */
+
+#endif
+}
+
 esp_err_t espradio_wifi_init(void) {
     espradio_rom_hooks_init();
-    RADIO_DBG("espradio: early_reset_reason cpu0=%d cpu1=%d\n",
-              rtc_get_reset_reason(0), rtc_get_reset_reason(1));
+
+    espradio_disable_all_wdt();
+
+    RADIO_DBG("espradio: before esp_wifi_bt_power_domain_on\n");
+    esp_wifi_bt_power_domain_on();
+    RADIO_DBG("espradio: after esp_wifi_bt_power_domain_on\n");
+
+#ifndef __XTENSA__
+    /* C3 (RISC-V) needs phy_get_romfunc_addr called early.
+     * On S3 (Xtensa) it is called internally by register_chipv7_phy. */
     phy_get_romfunc_addr();
     RADIO_DBG("espradio: phy_get_romfunc_addr g_phyFuns=%p\n", g_phyFuns);
+#endif
 
     /* Allocate the OSI table on the heap, with 256-byte alignment and a
      * 256-byte guard region on each side.  PMP analysis proved that the
@@ -146,24 +254,79 @@ esp_err_t espradio_wifi_init(void) {
      * checks g_osi_funcs_p at entry and skips critical init if it's non-zero. */
     memcpy(&g_wifi_osi_funcs, &espradio_osi_funcs, sizeof(wifi_osi_funcs_t));
 
+#ifdef __XTENSA__
+    /* Clang for Xtensa has an OR-offset bug: &struct->field computes
+     * (struct_base | field_offset) instead of (struct_base + field_offset).
+     * For wpa_crypto_funcs at offset 4, this fires when bit 2 of struct_base
+     * is set — e.g. cfg at 0x3fc9c59c has bit 2 = 1, so &cfg.wpa_crypto_funcs
+     * == cfg_base (not cfg_base+4), causing memcpy to overwrite cfg.osi_funcs
+     * with size=44 and cfg.wpa_crypto_funcs.size with version=1.
+     *
+     * Two-layer fix:
+     *   1. static + aligned(8) guarantees cfg_base bits 0-2 are always 0,
+     *      so the OR equals the ADD for any offset.
+     *   2. Use offsetof + char* arithmetic for the wpa_crypto_funcs pointer
+     *      so the compiler emits ADD rather than OR regardless of address. */
+    static wifi_init_config_t cfg __attribute__((aligned(8)));
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.osi_funcs              = s_heap_osi_funcs;
+    cfg.static_rx_buf_num      = 10;
+    cfg.dynamic_rx_buf_num     = 32;
+    cfg.tx_buf_type            = 1;
+    cfg.static_tx_buf_num      = 0;
+    cfg.dynamic_tx_buf_num     = 32;
+    cfg.rx_mgmt_buf_type       = 0;
+    cfg.rx_mgmt_buf_num        = 5;
+    cfg.cache_tx_buf_num       = 0;
+    cfg.csi_enable             = 0;
+    cfg.ampdu_rx_enable        = 0;
+    cfg.ampdu_tx_enable        = 0;
+    cfg.amsdu_tx_enable        = 0;
+    cfg.nvs_enable             = 0;
+    cfg.nano_enable            = 0;
+    cfg.rx_ba_win              = 6;
+    cfg.wifi_task_core_id      = 0;
+    cfg.beacon_max_len         = 752;
+    cfg.mgmt_sbuf_num          = 32;
+    cfg.feature_caps           = 0;
+    cfg.sta_disconnected_pm    = false;
+    cfg.espnow_max_encrypt_num = 7;
+    cfg.tx_hetb_queue_num      = 1;
+    cfg.dump_hesigb_enable     = false;
+    cfg.magic                  = 0x1F2F3F4F;
+    /* Copy wpa_crypto_funcs using offsetof+char* so the compiler emits ADD
+     * not OR for the destination address (see aligned(8) comment above). */
+    {
+        const wpa_crypto_funcs_t *src = &g_wifi_default_wpa_crypto_funcs;
+        wpa_crypto_funcs_t *dst = (wpa_crypto_funcs_t *)(
+            (char *)&cfg + offsetof(wifi_init_config_t, wpa_crypto_funcs));
+        memcpy(dst, src, sizeof(*dst));
+    }
+#else
+    /* C3 (RISC-V): no OR-offset bug, use the macro directly. */
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     cfg.osi_funcs = s_heap_osi_funcs;
     cfg.nvs_enable = 0;
+#endif
 
     extern wifi_osi_funcs_t *wifi_funcs;
     wifi_funcs = s_heap_osi_funcs;
 
-    RADIO_DBG("espradio: before esp_wifi_bt_power_domain_on\n");
-    esp_wifi_bt_power_domain_on();
-    RADIO_DBG("espradio: after esp_wifi_bt_power_domain_on\n");
     espradio_bt_irq_prewire();
+    RADIO_DBG("espradio: after bt_irq_prewire\n");
 
     extern void espradio_coex_adapter_init(void);
     espradio_coex_adapter_init();
+    RADIO_DBG("espradio: after coex_adapter_init\n");
     extern esp_err_t coex_pre_init(void);
-    coex_pre_init();
+    RADIO_DBG("espradio: calling coex_pre_init\n");
+    esp_err_t coex_rc = coex_pre_init();
+    RADIO_DBG("espradio: coex_pre_init returned %d\n", (int)coex_rc);
+    RADIO_DBG("espradio: before esp_wifi_init_internal cfg.osi_funcs=%p\n", (void*)cfg.osi_funcs);
 
     esp_err_t ret = esp_wifi_init_internal(&cfg);
+    RADIO_DBG("espradio: esp_wifi_init_internal returned %d\n", (int)ret);
+
     if (ret == 0) {
         extern void esp_phy_modem_init(void);
         esp_phy_modem_init();
