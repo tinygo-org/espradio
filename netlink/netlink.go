@@ -24,6 +24,9 @@ type Esplink struct {
 	netstack  *espradio.Stack
 	berkeley  xnet.StackBerkeley
 	stackloop sync.Once
+
+	// ArenaPoolSize overrides the default arena pool size (bytes). Zero uses target default.
+	ArenaPoolSize int
 }
 
 func (n *Esplink) rstack() xnet.StackRetrying {
@@ -41,7 +44,8 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 	}
 
 	err := espradio.Enable(espradio.Config{
-		Logging: espradio.LogLevelError,
+		Logging:       espradio.LogLevelError,
+		ArenaPoolSize: n.ArenaPoolSize,
 	})
 	if err != nil {
 		if debug {

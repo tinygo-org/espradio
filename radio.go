@@ -55,6 +55,9 @@ func (l LogLevel) String() string {
 
 type Config struct {
 	Logging LogLevel
+	// ArenaPoolSize overrides the default per-target arena pool size (bytes).
+	// Zero means use the target default.
+	ArenaPoolSize int
 }
 
 type AccessPoint struct {
@@ -166,11 +169,22 @@ func kickSched() {
 // be collected.  One large pool kept alive by this global is safe.
 var arenaPool []byte
 
+// ArenaStats returns the current arena usage and capacity in bytes.
+func ArenaStats() (used, capacity uint32) {
+	var u, c C.uint32_t
+	C.espradio_arena_stats(&u, &c)
+	return uint32(u), uint32(c)
+}
+
 // Enable and configure the radio.
 func Enable(config Config) error {
 	// Allocate arena pool from Go heap and hand it to C.
-	arenaPool = make([]byte, arenaPoolSize)
-	C.espradio_arena_init((*C.uint8_t)(unsafe.Pointer(&arenaPool[0])), C.size_t(arenaPoolSize))
+	poolSize := arenaPoolSize
+	if config.ArenaPoolSize > 0 {
+		poolSize = config.ArenaPoolSize
+	}
+	arenaPool = make([]byte, poolSize)
+	C.espradio_arena_init((*C.uint8_t)(unsafe.Pointer(&arenaPool[0])), C.size_t(poolSize))
 
 	startSchedTicker()
 	time.Sleep(schedTickerMs * time.Millisecond)

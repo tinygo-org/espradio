@@ -66,7 +66,7 @@ func initHardware() error {
 const ticksPerSecond = 16_000_000
 
 // S3 has 416KB SRAM1; larger arena pool for blob allocations.
-const arenaPoolSize = 80 * 1024
+const arenaPoolSize = 48 * 1024
 
 // ESP32-S3 (Xtensa): don't run the blob ISR from interrupt context — the deep
 // windowed call chains can overflow the interrupted goroutine's 8KB stack.
