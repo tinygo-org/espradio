@@ -2,7 +2,7 @@
 
 TinyGo package for using the radio onboard ESP32 for wireless communication. Work in progress.
 
-Already functions on the `esp32c3` processor for WiFi communication. More processors coming soon!
+Already functions on the `esp32c3` and `esp32s3` processors for WiFi communication. More processors coming soon!
 
 Bluetooth is still in progress.
 
@@ -208,4 +208,4 @@ HTTP server listening on http://192.168.1.46:80
 
 This package uses files from the [`esp-wifi-sys`](https://github.com/esp-rs/esp-wifi-sys) package, then copies the needed ones into the `blobs` directory.
 
-To update these dependencies to the latest version, run the `make update` command. This will update the submodule, then copy the needed files. Note that this may break existing functionality requiring changes to TinyGo linker files or other changes.
+To update these dependencies to the latest version, run the `make update` command. This will update the submodule, then copy the needed files. Then run `make patch-esp32s3` to patch the blobs for the LLD linker. Note that this may break existing functionality requiring changes to TinyGo linker files or other changes.
