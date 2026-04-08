@@ -1,8 +1,8 @@
-// This example demonstrates how to scan for available Wi-Fi access points using the ESP32 radio. It initializes the radio, starts it, and then continuously scans for Wi-Fi networks every 10 seconds, printing the SSID and RSSI of each detected access point.
+// This example demonstrates how to scan for available Wi-Fi access points using the ESP32 radio.
+// It initializes the radio, starts it, and then continuously scans for Wi-Fi networks every
+// 10 seconds, printing the SSID and RSSI of each detected access point.
 //
-// To run this example, use the following command, replacing `YourSSID` and `YourPassword` with your Wi-Fi credentials:
-//
-// tinygo flash -target xiao-esp32c3 -monitor -stack-size 8kb ./examples/scan
+// tinygo flash -target xiao-esp32c3 -monitor ./examples/scan
 package main
 
 import (

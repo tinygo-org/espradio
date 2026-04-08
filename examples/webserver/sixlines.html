@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tetris - TinyGo</title>
+<style>
+body{font-family:Arial,sans-serif;background:#f4f4f4;margin:0;padding:20px;display:flex;justify-content:center;min-height:100vh}
+.c{text-align:center}h1{color:#333;margin:0 0 12px}p{color:#555;margin:6px 0}
+a{color:#07c;text-decoration:none}a:hover{text-decoration:underline}
+#D{font-family:monospace;font-size:16px;line-height:1.2;margin:12px auto;display:inline-block}
+#D .e{display:inline-block;width:1ch}
+</style>
+</head>
+<body onload='onkeydown=e=>K=parseInt(e.key[5]||6,28)/3-8;Z=X=[B=A=12];Y=_=>{for(C=[q=c=i=4];f=i--*K;c-=!Z[h+(K+6?p+K:C[i]=p*A-(p/9|0)*145)])p=B[i];for(c?0:K+6?h+=K:B=C;i=K=q--;f+=Z[A+p])X[p=h+B[q]]=1;h+=A;if(f|B)for(Z=X,X=[l=228],B=[[-7,-20,6,h=17,-9,3,3][t=++t%7]-4,0,1,t-6?-A:2];l--;)for(l%A?l-=l%A*!Z[l]:(P++,c=l+=A);--c>A;)Z[c]=Z[c-A];for(S="";i<240;S+=X[i]|(X[i]=Z[i]|=++i%A<2|i>228)?i%A?"■":"■<br>":"<span class=e> </span>");D.innerHTML=S+P;setTimeout(Y,i-P)};Y(h=K=t=P=0)'>
+<div class="c">
+<h1>Tetris</h1>
+<p>Use arrow keys to play</p>
+<div id="D"></div>
+<p style="margin-top:12px"><a href="/">← Back</a></p>
+<p style="color:#999;font-size:small"><a href="https://fukuno.jig.jp/3267">6-line Tetris</a> by Taisuke Fukuno</p>
+</div>
+</body>
+</html>

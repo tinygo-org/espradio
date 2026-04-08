@@ -2,11 +2,166 @@
 
 TinyGo package for using the ESP32 onboard radio for wireless communication.
 
-Already works on the `esp32c3` and `esp32s3` processors for WiFi. More processors coming soon!
+Already works on the `esp32c3` and `esp32s3` processors for WiFi. More processors coming soon! Bluetooth is still in progress.
 
-Bluetooth is still in progress.
+## How to use
 
-## Examples
+This code starts a basic webserver running on an ESP32 using `espradio` along with the Go stdlib `net/http` package:
+
+```go
+package main
+
+import (
+	"io"
+	"log"
+	"net/http"
+	"time"
+
+	"tinygo.org/x/drivers/netdev"
+	nl "tinygo.org/x/drivers/netlink"
+	link "tinygo.org/x/espradio/netlink"
+)
+
+var (
+	ssid     string
+	password string
+	port     string = ":80"
+)
+
+func main() {
+	// use ESP32 radio
+	link := link.Esplink{}
+	netdev.UseNetdev(&link)
+
+	println("Connecting to WiFi...")
+	err := link.NetConnect(&nl.ConnectParams{
+		Ssid:       ssid,
+		Passphrase: password,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	println("Connected to WiFi.")
+
+	// now setup the web server using the Go "net/http" package:
+	http.HandleFunc("/", hello)
+
+	h, _ := link.Addr()
+	host := h.String()
+	println("HTTP server listening on http://" + host + port)
+	err = http.ListenAndServe(host+port, nil)
+	for err != nil {
+		println("error:", err.Error())
+		time.Sleep(5 * time.Second)
+	}
+}
+
+func hello(w http.ResponseWriter, r *http.Request) {
+	println(r.Method, r.URL.Path)
+	w.Header().Set(`Content-Type`, `text/plain; charset=UTF-8`)
+	io.WriteString(w, "hello")
+}
+```
+
+Flash it using TinyGo like this:
+
+```
+$ tinygo flash -target xiao-esp32s3 -ldflags="-X main.ssid=yourssid -X main.password=yourpassword" -size short -monitor ./examples/hello
+   code    data     bss |   flash     ram
+ 860073   33552  345392 |  893625  378944
+Connecting to /dev/ttyACM0...
+Connected.      
+Detected chip: ESP32-S3
+...
+```
+
+Then you can test it by using `curl`:
+
+```
+$ curl -w "\n" http://192.168.1.241/
+hello
+```
+
+## How it works
+
+`espradio` uses the binary blobs provided by Espressif and calls them directly using TinyGo's built-in CGo support. This allows them to be fast and utilize the well-tested existing binaries for low level radio communication.
+
+On top of that `espradio` then uses the [`lneto`](https://github.com/soypat/lneto) package, a pure Go layer 2 networking stack.
+
+## Examples - `net` package calling `lneto`
+
+### hello
+
+Runs a minimal webserver using the Go `net/http` package using the `netlink` interface.
+
+```
+tinygo flash -target xiao-esp32s3 -ldflags="-X main.ssid=yourssid -X main.password=yourpassword" -size short -monitor ./examples/hello
+```
+
+### mqtt
+
+Uses the MQTT machine to machine protocol to publish and subscribe to messages with the `broker.hivemq.com` test server. Uses the Go stdlib and the [`natiu-mqtt`](github.com/soypat/natiu-mqtt) package with the `netlink` interface.
+
+```
+$ tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=yourssid -X main.password=yourpassword" -size short -monitor ./examples/mqtt/
+   code    data     bss |   flash     ram
+ 701066   22700  279290 |  723766  301990
+
+Connected to ESP32-C3
+Flashing: 723872/723872 bytes (100%)               
+Connected to /dev/ttyACM0. Press Ctrl-C to exit.                                                          
+load:0x4202c860,len:0x84310
+SHA-256 comparison failed:
+Calculated: 6bc25eb465fa7599f460725ba7ca7550c86094cb2addfb1fe513499539e0bdd5                                                                                                                                        
+Expected: c4e21f71423096b6072c04d6e2e0c1c8809ea7dc92c5394e6ebba6a0dea25a79                                                                                                                                          
+Attempting to boot anyway...              
+entry 0x40398dc4                          
+Connecting to WiFi... 
+Connected to WiFi.                   
+ClientId: tinygo-client-BFEIHFDOCT   
+Connecting to MQTT broker at broker.hivemq.com:1883
+TCP connected to 35.157.137.172:1883
+Sending MQTT CONNECT...                                                                                   
+MQTT CONNECT succeeded                                                                                    
+Subscribed to topic cpu/usage                                                                             
+Message Random value: 45 received on topic cpu/usage                                                      
+Message Random value: 54 received on topic cpu/usage
+Message Random value: 62 received on topic cpu/usage
+Message Random value: 41 received on topic cpu/usage
+Message Random value: 68 received on topic cpu/usage
+Message Random value: 36 received on topic cpu/usage
+Message Random value: 22 received on topic cpu/usage
+Message Random value: 73 received on topic cpu/usage
+Message Random value: 27 received on topic cpu/usage
+Message Random value: 86 received on topic cpu/usage                                                      
+Disconnected from MQTT broker.
+```
+
+### webserver
+
+![webserver image](./images/webserver.png)
+
+Runs a webserver using the Go `net/http` package using the `netlink` interface:
+
+```
+$ tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=yourssid -X main.password=yourpassword" -stack-size 8kb -monitor ./examples/webserver/
+Connected to ESP32-C3
+Flashing: 953984/953984 bytes (100%)
+Connected to /dev/ttyACM0. Press Ctrl-C to exit.
+load:0x403918e4,len:0xa474
+load:0x42037c0c,len:0xb1248
+SHA-256 comparison failed:
+Calculated: 87698da75b5f09de7723e8650f1c84416180cfad80a2800e1adeb04c6d6f2087
+Expected:
+2ca7343abec2d068cbb8f39247e44d8aca94e5f0b78f623c7b7eb8981d8499cc
+Attempting to boot anyway...
+entry 0x4039bd14
+Connecting to WiFi...
+HTTP server listening on http://192.168.1.46:80
+```
+
+## Examples - `lneto` package only
 
 ### ap
 
@@ -122,45 +277,6 @@ incoming connection: 192.168.1.223 from port 53640
 Got webpage request!
 ```
 
-### mqtt
-
-Uses the MQTT machine to machine protocol to publish and subscribe to messages with the test.mosquitto.org server. Uses the Go stdlib and the [`natiu-mqtt`](github.com/soypat/natiu-mqtt) package with the `netlink` interface.
-
-```
-$ tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=yourssid -X main.password=yourpassword" -size short -monitor ./examples/mqtt/
-   code    data     bss |   flash     ram
- 701066   22700  279290 |  723766  301990
-
-Connected to ESP32-C3
-Flashing: 723872/723872 bytes (100%)               
-Connected to /dev/ttyACM0. Press Ctrl-C to exit.                                                          
-load:0x4202c860,len:0x84310
-SHA-256 comparison failed:
-Calculated: 6bc25eb465fa7599f460725ba7ca7550c86094cb2addfb1fe513499539e0bdd5                                                                                                                                        
-Expected: c4e21f71423096b6072c04d6e2e0c1c8809ea7dc92c5394e6ebba6a0dea25a79                                                                                                                                          
-Attempting to boot anyway...              
-entry 0x40398dc4                          
-Connecting to WiFi... 
-Connected to WiFi.                   
-ClientId: tinygo-client-BFEIHFDOCT   
-Connecting to MQTT broker at broker.hivemq.com:1883
-TCP connected to 35.157.137.172:1883
-Sending MQTT CONNECT...                                                                                   
-MQTT CONNECT succeeded                                                                                    
-Subscribed to topic cpu/usage                                                                             
-Message Random value: 45 received on topic cpu/usage                                                      
-Message Random value: 54 received on topic cpu/usage
-Message Random value: 62 received on topic cpu/usage
-Message Random value: 41 received on topic cpu/usage
-Message Random value: 68 received on topic cpu/usage
-Message Random value: 36 received on topic cpu/usage
-Message Random value: 22 received on topic cpu/usage
-Message Random value: 73 received on topic cpu/usage
-Message Random value: 27 received on topic cpu/usage
-Message Random value: 86 received on topic cpu/usage                                                      
-Disconnected from MQTT broker.
-```
-
 ### scan
 
 Scans for WiFi access points.
@@ -190,26 +306,6 @@ AP: rems RSSI -79
 
 Starts the ESP32 radio.
 
-### webserver
-
-Runs a webserver using the Go `net/http` package using the `netlink` interface:
-
-```
-$ tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=yourssid -X main.password=yourpassword" -stack-size 8kb -monitor ./examples/webserver/
-Connected to ESP32-C3
-Flashing: 953984/953984 bytes (100%)
-Connected to /dev/ttyACM0. Press Ctrl-C to exit.
-load:0x403918e4,len:0xa474
-load:0x42037c0c,len:0xb1248
-SHA-256 comparison failed:
-Calculated: 87698da75b5f09de7723e8650f1c84416180cfad80a2800e1adeb04c6d6f2087
-Expected:
-2ca7343abec2d068cbb8f39247e44d8aca94e5f0b78f623c7b7eb8981d8499cc
-Attempting to boot anyway...
-entry 0x4039bd14
-Connecting to WiFi...
-HTTP server listening on http://192.168.1.46:80
-```
 
 ## Updating `esp-wifi-sys`
 

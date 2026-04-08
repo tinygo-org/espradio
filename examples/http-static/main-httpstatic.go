@@ -1,6 +1,9 @@
-// This example shows how to create a simple HTTP server that serves a static webpage. The server listens for incoming HTTP requests and responds with the contents of the embedded `index.html` file. You can test it by connecting to the same Wi-Fi network as the ESP32 and navigating to the IP address assigned to the ESP32 in your browser.
+// This example shows how to create a simple HTTP server that serves a static webpage.
+// The server listens for incoming HTTP requests and responds with the contents of the
+// embedded `index.html` file. You can test it by connecting to the same Wi-Fi network
+// as the ESP32 and navigating to the IP address assigned to the ESP32 in your browser.
 //
-// tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=YourSSID -X main.password=YourPassword" -monitor -stack-size 8kb ./examples/http-static
+// tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=YourSSID -X main.password=YourPassword" -monitor ./examples/http-static
 package main
 
 import (
