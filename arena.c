@@ -117,6 +117,8 @@ void *espradio_arena_alloc(size_t size) {
         blk = FREE_NEXT(blk);
     }
     ARENA_DBG("arena: alloc %zu FAILED (OOM)\n", size);
+    /* Use puts instead of printf to avoid printf→malloc recursion via --wrap */
+    puts("arena: OOM");
     return NULL;
 }
 
@@ -130,7 +132,25 @@ void *espradio_arena_calloc(size_t n, size_t size) {
 void espradio_arena_free(void *p) {
     if (!p) return;
     uint8_t *blk = PAYLOAD_BLK(p);
+
+    /* Reject pointers outside the arena pool.  With --wrap=free on
+     * Xtensa, ALL free() calls arrive here — including frees of
+     * non-arena memory (picolibc internals, ROM buffers, etc.).
+     * Without this check the coalescing code below would interpret
+     * random memory as block headers and corrupt the Go heap. */
+    if (blk < arena_base || blk >= arena_base + arena_cap) {
+        ARENA_DBG("arena: free %p OUTSIDE pool [%p, %p) — ignored\n",
+                  p, arena_base, arena_base + arena_cap);
+        return;
+    }
+
     size_t bsz = BLK_SIZE(blk);
+
+    /* Sanity-check the block header. */
+    if (bsz == 0 || bsz > arena_cap || blk + bsz > arena_base + arena_cap) {
+        ARENA_DBG("arena: free %p corrupt header (bsz=%zu) — ignored\n", p, bsz);
+        return;
+    }
 
     ARENA_DBG("arena: free %p (blk %p, size %zu)\n", p, blk, bsz);
 
@@ -170,7 +190,14 @@ void *espradio_arena_realloc(void *ptr, size_t new_size) {
     if (new_size == 0) { espradio_arena_free(ptr); return NULL; }
 
     uint8_t *blk = PAYLOAD_BLK(ptr);
+    /* Reject non-arena pointers (see espradio_arena_free comment). */
+    if (blk < arena_base || blk >= arena_base + arena_cap) {
+        return espradio_arena_alloc(new_size);
+    }
     size_t old_total = BLK_SIZE(blk);
+    if (old_total == 0 || old_total > arena_cap || blk + old_total > arena_base + arena_cap) {
+        return espradio_arena_alloc(new_size);
+    }
     size_t old_payload = old_total - OVERHEAD;
 
     void *np = espradio_arena_alloc(new_size);
