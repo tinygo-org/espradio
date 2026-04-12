@@ -50,7 +50,10 @@ func main() {
 	// wait a bit for serial
 	time.Sleep(2 * time.Second)
 
-	link := link.Esplink{}
+	link := link.Esplink{
+		// link needs a 48k arena pool to handle the blob allocations for WiFi.
+		ArenaPoolSize: 48 * 1024,
+	}
 	netdev.UseNetdev(&link)
 
 	println("Connecting to WiFi...")
