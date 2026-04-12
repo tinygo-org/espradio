@@ -117,8 +117,6 @@ void *espradio_arena_alloc(size_t size) {
         blk = FREE_NEXT(blk);
     }
     ARENA_DBG("arena: alloc %zu FAILED (OOM)\n", size);
-    /* Use puts instead of printf to avoid printf→malloc recursion via --wrap */
-    puts("arena: OOM");
     return NULL;
 }
 
