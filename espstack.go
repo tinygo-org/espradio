@@ -46,21 +46,21 @@ func NewStack(dev *NetDev, cfg StackConfig) (*Stack, error) {
 	stack := &Stack{dev: dev}
 	const MTU = MaxFrameSize - ethernet.MaxOverheadSize + 4 // CRC not included:+4
 	err = stack.s.Reset(xnet.StackConfig{
-		StaticAddress:   cfg.StaticAddress,
-		DNSServer:       cfg.DNSServer,
-		NTPServer:       cfg.NTPServer,
-		Hostname:        cfg.Hostname,
-		MaxTCPConns:     cfg.MaxTCPPorts,
-		MaxUDPConns:     cfg.MaxUDPPorts,
-		RandSeed:        time.Now().UnixNano() ^ cfg.RandSeed,
-		HardwareAddress: mac,
-		MTU:             MTU,
+		StaticAddress:     cfg.StaticAddress,
+		DNSServer:         cfg.DNSServer,
+		NTPServer:         cfg.NTPServer,
+		Hostname:          cfg.Hostname,
+		MaxActiveTCPPorts: uint16(cfg.MaxTCPPorts),
+		MaxActiveUDPPorts: uint16(cfg.MaxUDPPorts),
+		RandSeed:          time.Now().UnixNano() ^ cfg.RandSeed,
+		HardwareAddress:   mac,
+		MTU:               MTU,
 	})
 	if err != nil {
 		return nil, err
 	}
 	dev.SetEthRecvHandler(func(pkt []byte) error {
-		return stack.s.Demux(pkt, 0)
+		return stack.s.IngressEthernet(pkt)
 	})
 	stack.rxtxBuf = make([]byte, MTU+ethernet.MaxOverheadSize)
 	return stack, nil
@@ -84,7 +84,7 @@ func (stack *Stack) RecvAndSend() (send, recv int, err error) {
 		recv = 1 // At least one frame was processed.
 	}
 
-	send, err = stack.s.Encapsulate(stack.rxtxBuf, -1, 0)
+	send, err = stack.s.EgressEthernet(stack.rxtxBuf)
 	if err != nil {
 		return send, recv, err
 	} else if errrecv != nil {
