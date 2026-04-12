@@ -2,3 +2,5 @@ esp-wifi
 ./vscode
 *.bin
 *.elf
+build
+
