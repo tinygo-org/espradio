@@ -20,6 +20,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/soypat/lneto"
 	"github.com/soypat/lneto/http/httpraw"
 	"github.com/soypat/lneto/tcp"
 	"github.com/soypat/lneto/x/xnet"
@@ -106,7 +107,9 @@ func main() {
 	println("got IP:", dhcp.AssignedAddr.String())
 
 	lstack := espstack.LnetoStack()
-	rstack := lstack.StackRetrying(pollTime)
+	rstack := lstack.StackRetrying(lneto.BackoffStrategy(func(_ uint) time.Duration {
+		return pollTime
+	}))
 	gatewayHW, err := rstack.DoResolveHardwareAddress6(dhcp.Router, 500*time.Millisecond, 4)
 	if err != nil {
 		panic("ARP resolve failed: " + err.Error())

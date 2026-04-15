@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/soypat/lneto"
 	"github.com/soypat/lneto/x/xnet"
 
 	nl "tinygo.org/x/drivers/netlink"
@@ -15,6 +16,10 @@ import (
 )
 
 const pollTime = 5 * time.Millisecond
+
+var pollBackoff = lneto.BackoffStrategy(func(_ uint) time.Duration {
+	return pollTime
+})
 
 // Esplink implements the Netlinker interface for the ESP32-C3's WiFi interface, using the espradio package and an lneto Stack.
 type Esplink struct {
@@ -30,7 +35,7 @@ type Esplink struct {
 }
 
 func (n *Esplink) rstack() xnet.StackRetrying {
-	return n.netstack.LnetoStack().StackRetrying(pollTime)
+	return n.netstack.LnetoStack().StackRetrying(pollBackoff)
 }
 
 // NetConnect device to network
@@ -113,7 +118,7 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 	}
 	n.stackloop.Do(func() {
 		// Start stack goroutine once.
-		gostack := n.netstack.LnetoStack().StackGo(pollTime, xnet.StackGoConfig{
+		gostack := n.netstack.LnetoStack().StackGo(pollBackoff, xnet.StackGoConfig{
 			ListenerPoolConfig: xnet.TCPPoolConfig{
 				PoolSize:           2,
 				QueueSize:          4,

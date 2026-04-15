@@ -1,6 +1,6 @@
 # espradio
 
-[![Build](https://github.com/tinygo-org/espradio/actions/workflows/build.yml/badge.svg)](https://github.com/tinygo-org/espradio/actions/workflows/build.yml)
+[![PkgGoDev](https://pkg.go.dev/badge/pkg.go.dev/tinygo.org/x/espradio)](https://pkg.go.dev/tinygo.org/x/espradio) [![Build](https://github.com/tinygo-org/espradio/actions/workflows/build.yml/badge.svg)](https://github.com/tinygo-org/espradio/actions/workflows/build.yml)
 
 TinyGo package for using the ESP32 onboard radio for wireless communication.
 

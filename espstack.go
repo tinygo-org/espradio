@@ -5,6 +5,7 @@ import (
 	"net/netip"
 	"time"
 
+	"github.com/soypat/lneto"
 	"github.com/soypat/lneto/ethernet"
 	"github.com/soypat/lneto/x/xnet"
 )
@@ -110,8 +111,9 @@ func (stack *Stack) SetupWithDHCP(cfg DHCPConfig) (*xnet.DHCPResults, error) {
 	}
 
 	lstack := stack.LnetoStack()
-	const pollTime = 50 * time.Millisecond
-	rstack := lstack.StackRetrying(pollTime)
+	rstack := lstack.StackRetrying(lneto.BackoffStrategy(func(_ uint) time.Duration {
+		return 50 * time.Millisecond
+	}))
 
 	dhcpResults, err := rstack.DoDHCPv4(reqaddr, 3*time.Second, 3)
 	if err != nil {
