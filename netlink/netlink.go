@@ -220,6 +220,7 @@ func (n *Esplink) Socket(domain int, stype int, protocol int) (int, error) {
 	return n.berkeley.Socket(domain, stype, protocol)
 }
 
+// Bind binds a socket to an IP address and port.
 func (n *Esplink) Bind(sockfd int, ip netip.AddrPort) error {
 	if debug {
 		println("Bind: sockfd", sockfd, "ip", ip.String())
@@ -228,6 +229,7 @@ func (n *Esplink) Bind(sockfd int, ip netip.AddrPort) error {
 	return n.berkeley.Bind(sockfd, ip)
 }
 
+// Connect connects a socket to a remote host and port.
 func (n *Esplink) Connect(sockfd int, host string, ip netip.AddrPort) error {
 	if debug {
 		println("Connect: sockfd", sockfd, "host", host, "ip", ip.String())
@@ -249,6 +251,7 @@ func (n *Esplink) Connect(sockfd int, host string, ip netip.AddrPort) error {
 	return n.berkeley.Connect(sockfd, host, ip)
 }
 
+// Listen marks a socket as listening for incoming connections.
 func (n *Esplink) Listen(sockfd int, backlog int) error {
 	if debug {
 		println("Listen: sockfd", sockfd, "backlog", backlog)
@@ -257,6 +260,7 @@ func (n *Esplink) Listen(sockfd int, backlog int) error {
 	return n.berkeley.Listen(sockfd, backlog)
 }
 
+// Accept accepts a new incoming connection on a listening socket, returning a new socket and the remote address.
 func (n *Esplink) Accept(sockfd int) (int, netip.AddrPort, error) {
 	if debug {
 		println("Accept: sockfd", sockfd)
@@ -265,6 +269,7 @@ func (n *Esplink) Accept(sockfd int) (int, netip.AddrPort, error) {
 	return n.berkeley.Accept(sockfd)
 }
 
+// Send sends data on a connected socket.
 func (n *Esplink) Send(sockfd int, buf []byte, flags int, deadline time.Time) (int, error) {
 	if debug {
 		println("Send: sockfd", sockfd, "len", len(buf), "flags", flags, "deadline", deadline.String())
@@ -273,6 +278,7 @@ func (n *Esplink) Send(sockfd int, buf []byte, flags int, deadline time.Time) (i
 	return n.berkeley.Send(sockfd, buf, flags, deadline)
 }
 
+// Recv receives data from a connected socket.
 func (n *Esplink) Recv(sockfd int, buf []byte, flags int, deadline time.Time) (int, error) {
 	if debug {
 		println("Recv: sockfd", sockfd, "len", len(buf), "flags", flags, "deadline", deadline.String())
@@ -281,6 +287,7 @@ func (n *Esplink) Recv(sockfd int, buf []byte, flags int, deadline time.Time) (i
 	return n.berkeley.Recv(sockfd, buf, flags, deadline)
 }
 
+// Close closes a socket.
 func (n *Esplink) Close(sockfd int) error {
 	if debug {
 		println("Close: sockfd", sockfd)
@@ -289,6 +296,7 @@ func (n *Esplink) Close(sockfd int) error {
 	return n.berkeley.Close(sockfd)
 }
 
+// SetSockOpt sets a socket option.
 func (n *Esplink) SetSockOpt(sockfd int, level int, opt int, value interface{}) error {
 	if debug {
 		println("SetSockOpt: sockfd", sockfd, "level", level, "opt", opt, "value", value)

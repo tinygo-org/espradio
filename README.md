@@ -2,13 +2,24 @@
 
 [![PkgGoDev](https://pkg.go.dev/badge/pkg.go.dev/tinygo.org/x/espradio)](https://pkg.go.dev/tinygo.org/x/espradio) [![Build](https://github.com/tinygo-org/espradio/actions/workflows/build.yml/badge.svg)](https://github.com/tinygo-org/espradio/actions/workflows/build.yml)
 
-TinyGo package for using the ESP32 onboard radio for wireless communication.
+[TinyGo](https://tinygo.org/) package for wireless communication on [Espressif](https://www.espressif.com/) ESP32xx microcontrollers.
 
-Already works on the `esp32c3` and `esp32s3` processors for WiFi. More processors coming soon! Bluetooth is still in progress.
+Currently supports WiFi on the [`esp32c3`](https://www.espressif.com/en/products/socs/esp32-c3) single-core 32-bit RISC-V MCU and [`esp32s3`](https://www.espressif.com/en/products/socs/esp32-s3) dual-core XTensa LX7 MCU. Bluetooth is in progress, along with more processors.
+
+### Features
+
+- WiFi station (STA) and soft-AP modes
+- WiFi scanning
+- Go stdlib `net` support using the TinyGo `netdev`/`netlink` interface
+- Pure-Go TCP/IP stack with DHCP, DNS, and NTP (uses [`lneto`](https://github.com/soypat/lneto))
+- TCP and UDP Berkeley sockets API
+- Raw Ethernet frame send/receive
+- MQTT client support (uses [`natiu-mqtt`](https://github.com/soypat/natiu-mqtt))
+- QEMU simulation target for ESP32-C3
 
 ## How to use
 
-This code starts a basic webserver running on an ESP32 using `espradio` along with the Go stdlib `net/http` package:
+This code starts a basic webserver running on a [Seeed Studio XIAO-ESP32C3](https://www.seeedstudio.com/Seeed-XIAO-ESP32C3-p-5431.html) using `espradio` along with the Go stdlib `net/http` package:
 
 ```go
 package main
@@ -85,11 +96,17 @@ $ curl -w "\n" http://192.168.1.241/
 hello
 ```
 
+## Features
+
+
+
 ## How it works
 
 `espradio` uses the binary blobs provided by Espressif and calls them directly using TinyGo's built-in CGo support. This allows them to be fast and utilize the well-tested existing binaries for low level radio communication.
 
 On top of that `espradio` then uses the [`lneto`](https://github.com/soypat/lneto) package, a pure Go layer 2 networking stack.
+
+See the [architecture diagram](#architecture) for more details.
 
 ## Examples - `net` package calling `lneto`
 
@@ -337,6 +354,29 @@ AP: rems RSSI -79
 ### starting
 
 Starts the ESP32 radio.
+
+## Architecture
+
+```mermaid
+flowchart TD
+    A["User Application"]
+    B["espradio/netlink"]
+    C["espradio Stack"]
+    D["espradio NetDev"]
+    E["CGo Bridge"]
+    F["Espressif Binary Blobs"]
+    G["ESP32 Radio Hardware"]
+
+    A --Go net/http or lneto API--> B --Esplink netdev interface--> C --lneto TCP/IP + DHCP/DNS/NTP--> D --EthernetDevice send/recv--> E --radio.c / lib.c / isr.c--> F --WiFi + PHY libs--> G
+```
+
+- **User Application** - your code, using Go `net/http` or the `lneto` API directly.
+- **espradio/netlink** - implements the TinyGo `netdev`/`netlink` interface so the Go stdlib `net` package works.
+- **espradio Stack** - wraps the [`lneto`](https://github.com/soypat/lneto) pure-Go TCP/IP stack with DHCP, DNS, and NTP support.
+- **espradio NetDev** - L2 Ethernet device that sends/receives raw frames to and from the radio.
+- **CGo Bridge** - C shim code that translates between Go and the Espressif binary libraries.
+- **Espressif Binary Blobs** - pre-compiled WiFi and PHY libraries provided by Espressif.
+- **ESP32 Radio Hardware** - the on-chip 2.4 GHz radio peripheral.
 
 
 ## Updating `esp-wifi-sys`

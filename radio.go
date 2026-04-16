@@ -53,6 +53,7 @@ func (l LogLevel) String() string {
 	}
 }
 
+// Config configures the radio and its driver.
 type Config struct {
 	Logging LogLevel
 	// ArenaPoolSize overrides the default per-target arena pool size (bytes).
@@ -60,16 +61,19 @@ type Config struct {
 	ArenaPoolSize int
 }
 
+// AccessPoint represents a Wi-Fi access point discovered during scanning.
 type AccessPoint struct {
 	SSID string
 	RSSI int
 }
 
+// STAConfig configures station mode connection parameters.
 type STAConfig struct {
 	SSID     string
 	Password string
 }
 
+// ConnectResult represents the result of a connection attempt.
 type ConnectResult struct {
 	Connected bool
 	SSID      string
@@ -77,6 +81,7 @@ type ConnectResult struct {
 	Reason    uint8
 }
 
+// APConfig configures soft-AP mode parameters.
 type APConfig struct {
 	SSID     string
 	Password string
@@ -176,7 +181,7 @@ func ArenaStats() (used, capacity uint32) {
 	return uint32(u), uint32(c)
 }
 
-// Enable and configure the radio.
+// Enable and configure the radio for WiFi.
 func Enable(config Config) error {
 	// Allocate arena pool from Go heap and hand it to C.
 	poolSize := arenaPoolSize
@@ -217,8 +222,11 @@ func Enable(config Config) error {
 	return nil
 }
 
-// ─── Start / Scan ────────────────────────────────────────────────────────────
-
+// Start starts the Wi-Fi driver and connects to the AP if in station mode.
+// Blocks until the driver is ready.  Start is separate from Enable to allow
+// configuration (e.g. country code) before starting, and to allow scanning without
+// starting the driver.  Start calls schedOnce in a loop to let the blob process
+// its internal startup sequence (posting events, etc.) before Start returns.
 func Start() error {
 	var mode C.wifi_mode_t
 	if code := C.esp_wifi_get_mode(&mode); code != C.ESP_OK {
