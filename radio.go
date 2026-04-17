@@ -1,3 +1,5 @@
+//go:build esp32c3 || esp32c3_qemu_target || esp32s3
+
 package espradio
 
 /*
