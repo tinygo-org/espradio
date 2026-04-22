@@ -58,18 +58,18 @@ func (nd *NetDev) SetEthRecvHandler(handler func(pkt []byte) error) {
 // EthPoll checks for a received Ethernet frame and calls the receive handler if one is available.
 // EthPoll returns (true, nil) if a frame was received and the handler was called, (false, nil)
 // if no frame was available, or (false, err) if an error occurred.
-func (nd *NetDev) EthPoll(buf []byte) (bool, error) {
+func (nd *NetDev) EthPoll(buf []byte) (int, error) {
 	if C.espradio_netif_rx_available() == 0 {
-		return false, nil
+		return 0, nil
 	}
 	n := C.espradio_netif_rx_pop(unsafe.Pointer(&buf[0]), C.uint16_t(len(buf)))
 	if n == 0 {
-		return false, nil
+		return 0, nil
 	}
 	if nd.rxHandler != nil {
 		nd.rxHandler(buf[:n])
 	}
-	return true, nil
+	return n, nil
 }
 
 // HardwareAddr6 returns the 6-byte MAC address of the WiFi interface.

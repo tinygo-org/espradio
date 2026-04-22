@@ -2,9 +2,9 @@ package netlink
 
 import (
 	"errors"
+	"machine"
 	"net"
 	"net/netip"
-	"runtime"
 	"sync"
 	"time"
 
@@ -28,6 +28,7 @@ type Esplink struct {
 
 	netstack  *espradio.Stack
 	berkeley  xnet.StackBerkeley
+	pcap      xnet.CapturePrinter
 	stackloop sync.Once
 
 	// ArenaPoolSize overrides the default arena pool size (bytes). Zero uses target default.
@@ -128,7 +129,11 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 				ClosingTimeout:     2 * time.Second,
 			},
 		})
+
 		n.berkeley = *xnet.NewBerkeleyStack(gostack.Socket)
+		if debug {
+			n.netstack.EnablePacketCaptureTo(machine.Serial)
+		}
 		go handleStack(espstack)
 	})
 	err = n.doDHCP()
@@ -310,7 +315,6 @@ func handleStack(stack *espradio.Stack) {
 		send, recv, _ := stack.RecvAndSend()
 		if send == 0 && recv == 0 {
 			time.Sleep(pollTime)
-			runtime.Gosched()
 		}
 	}
 }

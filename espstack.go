@@ -2,6 +2,7 @@ package espradio
 
 import (
 	"errors"
+	"io"
 	"net/netip"
 	"time"
 
@@ -12,9 +13,11 @@ import (
 
 // Stack wraps an lneto async network stack on top of a NetDev (EthernetDevice).
 type Stack struct {
-	s       xnet.StackAsync
-	dev     *NetDev
-	rxtxBuf []byte
+	s          xnet.StackAsync
+	dev        *NetDev
+	rxtxBuf    []byte
+	enablePcap bool
+	pcap       *xnet.CapturePrinter
 }
 
 // StackConfig configures the lneto-based network stack.
@@ -67,6 +70,17 @@ func NewStack(dev *NetDev, cfg StackConfig) (*Stack, error) {
 	return stack, nil
 }
 
+func (stack *Stack) EnablePacketCaptureTo(w io.Writer) {
+	stack.enablePcap = w != nil
+	if w != nil {
+		stack.pcap.Configure(w, xnet.CapturePrinterConfig{
+			NamespaceWidth: 3, // "IN ", "OUT"
+			TimePrecision:  3,
+			Now:            time.Now,
+		})
+	}
+}
+
 // LnetoStack returns the underlying lneto async stack for advanced use.
 func (stack *Stack) LnetoStack() *xnet.StackAsync {
 	return &stack.s
@@ -80,11 +94,10 @@ func (stack *Stack) Hostname() string {
 // RecvAndSend polls the device for received frames and sends any pending
 // outgoing frames. Returns the number of bytes sent and received.
 func (stack *Stack) RecvAndSend() (send, recv int, err error) {
-	gotRecv, errrecv := stack.dev.EthPoll(stack.rxtxBuf)
-	if gotRecv {
-		recv = 1 // At least one frame was processed.
+	recv, errrecv := stack.dev.EthPoll(stack.rxtxBuf)
+	if stack.enablePcap && recv > 0 {
+		stack.pcap.PrintPacket("IN", stack.rxtxBuf[:recv])
 	}
-
 	send, err = stack.s.EgressEthernet(stack.rxtxBuf)
 	if err != nil {
 		return send, recv, err
@@ -93,6 +106,8 @@ func (stack *Stack) RecvAndSend() (send, recv int, err error) {
 	}
 	if send == 0 {
 		return send, recv, err
+	} else if stack.enablePcap {
+		stack.pcap.PrintPacket("OUT", stack.rxtxBuf[:send])
 	}
 
 	err = stack.dev.SendEthFrame(stack.rxtxBuf[:send])
