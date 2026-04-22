@@ -21,15 +21,13 @@ func main() {
 		Logging: espradio.LogLevelError,
 	})
 	if err != nil {
-		println("could not enable radio:", err)
-		return
+		failure("could not enable radio: " + err.Error())
 	}
 
 	println("starting radio...")
 	err = espradio.Start()
 	if err != nil {
-		println("could not start radio:", err)
-		return
+		failure("could not start radio: " + err.Error())
 	}
 
 	println("connecting to", ssid, "...")
@@ -38,16 +36,14 @@ func main() {
 		Password: password,
 	})
 	if err != nil {
-		println("connect failed:", err)
-		return
+		failure("connect failed: " + err.Error())
 	}
 	println("connected to", ssid, "!")
 
 	println("starting L2 netdev...")
 	nd, err := espradio.StartNetDev()
 	if err != nil {
-		println("netdev failed:", err)
-		return
+		failure("netdev failed: " + err.Error())
 	}
 
 	println("creating lneto stack...")
@@ -57,8 +53,7 @@ func main() {
 		MaxTCPPorts: 1,
 	})
 	if err != nil {
-		println("stack failed:", err)
-		return
+		failure("stack failed: " + err.Error())
 	}
 
 	// Start the poll loop in the background.
@@ -68,8 +63,7 @@ func main() {
 	println("starting DHCP...")
 	dhcp, err := stack.SetupWithDHCP(espradio.DHCPConfig{})
 	if err != nil {
-		println("DHCP failed:", err)
-		return
+		failure("DHCP failed: " + err.Error())
 	}
 	println("got IP:", dhcp.AssignedAddr.String())
 	println("gateway:", dhcp.Router.String())
@@ -94,5 +88,12 @@ func stackLoop(stack *espradio.Stack) {
 		}
 		_ = send
 		_ = recv
+	}
+}
+
+func failure(msg string) {
+	for {
+		println("failure:", msg)
+		time.Sleep(1 * time.Second)
 	}
 }

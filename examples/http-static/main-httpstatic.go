@@ -49,15 +49,13 @@ func main() {
 		Logging: espradio.LogLevelNone,
 	})
 	if err != nil {
-		println("could not enable radio:", err)
-		return
+		failure("could not enable radio: " + err.Error())
 	}
 
 	println("starting radio...")
 	err = espradio.Start()
 	if err != nil {
-		println("could not start radio:", err)
-		return
+		failure("could not start radio: " + err.Error())
 	}
 
 	println("connecting to", ssid, "...")
@@ -66,16 +64,14 @@ func main() {
 		Password: password,
 	})
 	if err != nil {
-		println("connect failed:", err)
-		return
+		failure("connect failed: " + err.Error())
 	}
 	println("connected to", ssid, "!")
 
 	println("starting L2 netdev...")
 	nd, err := espradio.StartNetDev()
 	if err != nil {
-		println("netdev failed:", err)
-		return
+		failure("netdev failed: " + err.Error())
 	}
 
 	println("creating lneto stack...")
@@ -85,8 +81,7 @@ func main() {
 		MaxTCPPorts: 1,
 	})
 	if err != nil {
-		println("stack failed:", err)
-		return
+		failure("stack failed: " + err.Error())
 	}
 
 	// Start the poll loop in the background.
@@ -95,7 +90,7 @@ func main() {
 
 	dhcpResults, err := espstack.SetupWithDHCP(espradio.DHCPConfig{})
 	if err != nil {
-		panic("DHCP failed:" + err.Error())
+		failure("DHCP failed: " + err.Error())
 	}
 	tcpPool, err := xnet.NewTCPPool(xnet.TCPPoolConfig{
 		PoolSize:           maxConns,
@@ -112,7 +107,7 @@ func main() {
 		},
 	})
 	if err != nil {
-		panic("tcppool create:" + err.Error())
+		failure("tcppool create: " + err.Error())
 	}
 
 	lstack := espstack.LnetoStack()
@@ -122,11 +117,11 @@ func main() {
 	var listener tcp.Listener
 	err = listener.Reset(listenPort, tcpPool)
 	if err != nil {
-		panic("listener reset:" + err.Error())
+		failure("listener reset: " + err.Error())
 	}
 	err = lstack.RegisterListener(&listener)
 	if err != nil {
-		panic("listener register:" + err.Error())
+		failure("listener register: " + err.Error())
 	}
 	println("listening on", "http://"+listenAddr.String())
 
@@ -241,5 +236,12 @@ func loopForeverStack(stack *espradio.Stack) {
 		if send == 0 && recv == 0 {
 			time.Sleep(pollTime)
 		}
+	}
+}
+
+func failure(msg string) {
+	for {
+		println("failure:", msg)
+		time.Sleep(1 * time.Second)
 	}
 }

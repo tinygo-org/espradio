@@ -2,7 +2,6 @@ package main
 
 import (
 	"io"
-	"log"
 	"net/http"
 	"time"
 
@@ -28,7 +27,7 @@ func main() {
 		Passphrase: password,
 	})
 	if err != nil {
-		log.Fatal(err)
+		failure("connect failed: " + err.Error())
 	}
 
 	println("Connected to WiFi.")
@@ -40,9 +39,8 @@ func main() {
 	host := h.String()
 	println("HTTP server listening on http://" + host + port)
 	err = http.ListenAndServe(host+port, nil)
-	for err != nil {
-		println("error:", err.Error())
-		time.Sleep(5 * time.Second)
+	if err != nil {
+		failure("HTTP server error: " + err.Error())
 	}
 }
 
@@ -50,4 +48,11 @@ func hello(w http.ResponseWriter, r *http.Request) {
 	println(r.Method, r.URL.Path)
 	w.Header().Set(`Content-Type`, `text/plain; charset=UTF-8`)
 	io.WriteString(w, "hello")
+}
+
+func failure(msg string) {
+	for {
+		println("failure:", msg)
+		time.Sleep(1 * time.Second)
+	}
 }

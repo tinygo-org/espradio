@@ -56,15 +56,13 @@ func main() {
 		Logging: espradio.LogLevelError,
 	})
 	if err != nil {
-		println("could not enable radio:", err)
-		return
+		failure("could not enable radio: " + err.Error())
 	}
 
 	println("starting radio...")
 	err = espradio.Start()
 	if err != nil {
-		println("could not start radio:", err)
-		return
+		failure("could not start radio: " + err.Error())
 	}
 
 	println("connecting to", ssid, "...")
@@ -73,16 +71,14 @@ func main() {
 		Password: password,
 	})
 	if err != nil {
-		println("connect failed:", err)
-		return
+		failure("connect failed: " + err.Error())
 	}
 	println("connected to", ssid, "!")
 
 	println("starting L2 netdev...")
 	nd, err := espradio.StartNetDev()
 	if err != nil {
-		println("netdev failed:", err)
-		return
+		failure("netdev failed: " + err.Error())
 	}
 
 	println("creating lneto stack...")
@@ -92,8 +88,7 @@ func main() {
 		MaxTCPPorts: 1,
 	})
 	if err != nil {
-		println("stack failed:", err)
-		return
+		failure("stack failed: " + err.Error())
 	}
 
 	// Start the poll loop in the background.
@@ -101,8 +96,7 @@ func main() {
 	println("starting DHCP...")
 	dhcp, err := espstack.SetupWithDHCP(espradio.DHCPConfig{})
 	if err != nil {
-		println("DHCP failed:", err)
-		return
+		failure("DHCP failed: " + err.Error())
 	}
 	println("got IP:", dhcp.AssignedAddr.String())
 
@@ -112,7 +106,7 @@ func main() {
 	}))
 	gatewayHW, err := rstack.DoResolveHardwareAddress6(dhcp.Router, 500*time.Millisecond, 4)
 	if err != nil {
-		panic("ARP resolve failed: " + err.Error())
+		failure("ARP resolve failed: " + err.Error())
 	}
 	lstack.SetGateway6(gatewayHW)
 
@@ -141,18 +135,18 @@ func main() {
 		},
 	})
 	if err != nil {
-		panic("tcppool create: " + err.Error())
+		failure("tcppool create: " + err.Error())
 	}
 
 	listenAddr := netip.AddrPortFrom(dhcp.AssignedAddr, listenPort)
 	var listener tcp.Listener
 	err = listener.Reset(listenPort, tcpPool)
 	if err != nil {
-		panic("listener reset: " + err.Error())
+		failure("listener reset: " + err.Error())
 	}
 	err = lstack.RegisterListener(&listener)
 	if err != nil {
-		panic("listener register: " + err.Error())
+		failure("listener register: " + err.Error())
 	}
 
 	println("listening on", "http://"+listenAddr.String())
@@ -462,5 +456,12 @@ func loopForeverStack(stack *espradio.Stack) {
 		if send == 0 && recv == 0 {
 			time.Sleep(pollTime)
 		}
+	}
+}
+
+func failure(msg string) {
+	for {
+		println("failure:", msg)
+		time.Sleep(1 * time.Second)
 	}
 }

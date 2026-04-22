@@ -7,7 +7,6 @@ package main
 import (
 	_ "embed"
 	"io"
-	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -62,7 +61,7 @@ func main() {
 		Passphrase: password,
 	})
 	if err != nil {
-		log.Fatal(err)
+		failure("could not connect to WiFi: " + err.Error())
 	}
 
 	http.Handle("/", logRequest(root))
@@ -76,9 +75,8 @@ func main() {
 	host := h.String()
 	println("HTTP server listening on http://" + host + port)
 	err = http.ListenAndServe(host+port, nil)
-	for err != nil {
-		println("error:", err.Error())
-		time.Sleep(5 * time.Second)
+	if err != nil {
+		failure("http.ListenAndServe: " + err.Error())
 	}
 }
 
@@ -157,4 +155,11 @@ func cnt(w http.ResponseWriter, r *http.Request) {
 	io.WriteString(w, `{"cnt": `)
 	io.WriteString(w, strconv.Itoa(counter))
 	io.WriteString(w, `}`)
+}
+
+func failure(msg string) {
+	for {
+		println("failure:", msg)
+		time.Sleep(1 * time.Second)
+	}
 }

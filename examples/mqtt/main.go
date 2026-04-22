@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"math/rand"
 	"net"
 	"time"
@@ -27,7 +26,7 @@ func main() {
 	time.Sleep(3 * time.Second)
 
 	if err := connectToWifi(); err != nil {
-		log.Fatal(err)
+		failure("WiFi connect failed: " + err.Error())
 	}
 
 	clientId := "tinygo-client-" + randomString(10)
@@ -48,7 +47,7 @@ func main() {
 		break
 	}
 	if conn == nil {
-		log.Fatal("all TCP connection attempts failed")
+		failure("all TCP connection attempts failed")
 	}
 	fmt.Printf("TCP connected to %v\n", conn.RemoteAddr())
 	defer conn.Close()
@@ -71,7 +70,7 @@ func main() {
 	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
 	err := client.Connect(ctx, conn, &varconn)
 	if err != nil {
-		log.Fatal("failed to connect: ", err)
+		failure("failed to connect: " + err.Error())
 	}
 	fmt.Println("MQTT CONNECT succeeded")
 
@@ -84,7 +83,7 @@ func main() {
 		},
 	})
 	if err != nil {
-		log.Fatal("failed to subscribe to", topic, err)
+		failure("failed to subscribe to " + topic + ": " + err.Error())
 	}
 	fmt.Printf("Subscribed to topic %s\n", topic)
 
@@ -96,7 +95,7 @@ func main() {
 
 	for i := 0; i < 10; i++ {
 		if !client.IsConnected() {
-			log.Fatal("client disconnected: ", client.Err())
+			failure("client disconnected: " + client.Err().Error())
 		}
 
 		payload := fmt.Sprintf("Random value: %d", randomInt(0, 100))
@@ -104,7 +103,7 @@ func main() {
 		pubVar.PacketIdentifier++
 		err = client.PublishPayload(pubFlags, pubVar, []byte(payload))
 		if err != nil {
-			log.Fatal("error transmitting message: ", err)
+			failure("error transmitting message: " + err.Error())
 		}
 
 		time.Sleep(time.Second)
@@ -112,7 +111,7 @@ func main() {
 		conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 		err = client.HandleNext()
 		if err != nil {
-			log.Fatal("handle next: ", err)
+			failure("handle next: " + err.Error())
 		}
 
 	}
@@ -158,4 +157,11 @@ func connectToWifi() error {
 	}
 
 	return errors.New("failed to connect to WiFi after 3 attempts")
+}
+
+func failure(msg string) {
+	for {
+		println("failure:", msg)
+		time.Sleep(1 * time.Second)
+	}
 }
