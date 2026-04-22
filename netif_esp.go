@@ -69,7 +69,7 @@ func (nd *NetDev) EthPoll(buf []byte) (int, error) {
 	if nd.rxHandler != nil {
 		nd.rxHandler(buf[:n])
 	}
-	return n, nil
+	return int(n), nil
 }
 
 // HardwareAddr6 returns the 6-byte MAC address of the WiFi interface.
