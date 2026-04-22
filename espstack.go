@@ -17,7 +17,7 @@ type Stack struct {
 	dev        *NetDev
 	rxtxBuf    []byte
 	enablePcap bool
-	pcap       *xnet.CapturePrinter
+	pcap       xnet.CapturePrinter
 }
 
 // StackConfig configures the lneto-based network stack.

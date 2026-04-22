@@ -28,7 +28,6 @@ type Esplink struct {
 
 	netstack  *espradio.Stack
 	berkeley  xnet.StackBerkeley
-	pcap      xnet.CapturePrinter
 	stackloop sync.Once
 
 	// ArenaPoolSize overrides the default arena pool size (bytes). Zero uses target default.
