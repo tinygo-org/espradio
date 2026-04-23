@@ -10,7 +10,11 @@ package espradio
 #cgo CFLAGS: -DCONFIG_SOC_WIFI_NAN_SUPPORT=0
 #cgo CFLAGS: -DESPRADIO_PHY_PATCH_ROMFUNCS=0
 #cgo CFLAGS: -fno-short-enums
-#cgo LDFLAGS: -Lblobs/libs/esp32s3 -lcoexist -lcore -lmesh -lnet80211 -lespnow -lregulatory -lphy -lpp -lwpa_supplicant
+// libprintf provides the Espressif blob's *_printf helpers and the OSI
+// __esp_radio_log_write/_writev entry points (GCC->GCC inside the blob).
+// We never call its varargs printf/vprintf/vsnprintf from Clang code —
+// our diagnostic output goes through ets_printf instead.
+#cgo LDFLAGS: -Lblobs/libs/esp32s3 -lcoexist -lcore -lmesh -lnet80211 -lespnow -lregulatory -lphy -lpp -lwpa_supplicant -lprintf
 
 #include "include.h"
 */

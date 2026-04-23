@@ -1,9 +1,14 @@
 #include "esp_coexist_internal.h"
 #include "espradio.h"
 #include <stdarg.h>
-#include <stdio.h>
 #include <string.h>
 #include <stdint.h>
+
+/* ROM printf only — never libprintf.a (varargs broken from Clang).
+ * The #define routes any remaining debug-gated printf() calls through
+ * ROM ets_printf so they don't crash if ESPRADIO_OSI_DEBUG is turned on. */
+extern int ets_printf(const char *fmt, ...);
+#define printf ets_printf
 
 /* Set to 1 to enable OSI callback logs (e.g. CGO_CFLAGS=-DESPRADIO_OSI_DEBUG=1). */
 #ifndef ESPRADIO_OSI_DEBUG
@@ -16,7 +21,10 @@ extern wifi_osi_funcs_t espradio_osi_funcs;
 static void espradio_wifi_reset_mac(void);
 void espradio_timer_pending_reset(void);
 
+/* ESP32's libnet80211.a already defines g_osi_funcs_p; on S3/C3 it's undefined. */
+#if !CONFIG_IDF_TARGET_ESP32 && !CONFIG_ESP_WIFI_TARGET_ESP32
 wifi_osi_funcs_t *g_osi_funcs_p;
+#endif
 
 /* Declared in radio.c — heap-allocated OSI table placed far from BSS to avoid
  * WiFi DMA corruption.  All runtime table updates go here AND to g_wifi_osi_funcs. */
@@ -65,16 +73,9 @@ esp_err_t espradio_esp_wifi_start(void) {
     return rc;
 }
 
-/* Simple printf backend expected by libcoexist.a. */
-__attribute__((weak)) void coexist_printf(const char *format, ...) {
-#if ESPRADIO_OSI_DEBUG
-    va_list args;
-    va_start(args, format);
-    printf("coexist: ");
-    vprintf(format, args);
-    va_end(args);
-#endif
-}
+/* Dead weak override for coexist_printf was removed: libprintf.a provides
+ * a STRONG coexist_printf, so our weak version never linked.  Blob-internal
+ * coexist log output flows blob -> libprintf -> __esp_radio_printf. */
 
 /**************************************************************************
  * Name: wifi_env_is_chip
@@ -207,7 +208,7 @@ static int32_t espradio_task_create(void *task_func, const char *name, uint32_t 
     printf("osi: task_create name=%s fn=%p stack=%lu prio=%lu param=%p\n",
            name ? name : "(null)", task_func, (unsigned long)stack_depth, (unsigned long)prio, param);
     printf("CCHK: task_create called\n");
-    fflush(stdout);
+    /* ets_printf is unbuffered — no flush needed. */
 #endif
     return espradio_task_create_pinned_to_core(task_func, name, stack_depth, param, prio, task_handle, 0);
 }
@@ -402,7 +403,7 @@ esp_err_t esp_event_post(esp_event_base_t event_base, int32_t event_id, const vo
     (void)ticks_to_wait;
 #if ESPRADIO_OSI_DEBUG
     printf("CCHK: event_post called\n");
-    fflush(stdout);
+    /* ets_printf is unbuffered — no flush needed. */
     uint8_t b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0, b7 = 0;
     uint32_t scan_status = 0;
     uint8_t scan_number = 0;
@@ -549,10 +550,17 @@ static void espradio_phy_enable(void) {
     phy_wifi_enable_set(1);
 #ifdef __XTENSA__
     /* PHY blob may re-enable glitch/brownout detectors; re-disable them. */
+#if CONFIG_IDF_TARGET_ESP32
+    /* ESP32: no glitch/power detectors.  Only re-disable brownout.
+     * Peripherals at 0x3FFxxxxx, not 0x6000xxxx. */
+    *(volatile uint32_t *)0x3FF480D4 &= ~((1u << 30) | (1u << 26)); /* BOD off */
+#else
+    /* ESP32-S3 */
     *(volatile uint32_t *)0x60008034 &= ~(1u << 20);        /* GLITCH_RST_EN=0 */
     *(volatile uint32_t *)0x60008148 = 0x0;                  /* FIB_SEL=0 (use register, not eFuse) */
     *(volatile uint32_t *)0x60008144 &= ~(1u << 31);        /* POWER_GLITCH_EN=0 */
     *(volatile uint32_t *)0x600080E8 &= ~((1u << 30) | (1u << 26)); /* BOD off */
+#endif
 #endif
 }
 
@@ -1036,29 +1044,14 @@ static uint32_t espradio_slowclk_cal_get(void) {
     return 28639;
 }
 
-#define LOG_MSG_MAX 384
-
-static void espradio_log_writev(unsigned int level, const char* tag, const char* format, va_list args) {
-    static char buf[LOG_MSG_MAX];
-    int n = vsnprintf(buf, sizeof(buf), format, args);
-    if (n > 0) {
-        if ((size_t)n >= sizeof(buf)) {
-            buf[sizeof(buf)-1] = '\0';
-        }
-        if (tag && tag[0]) {
-            printf("[wifi][%u][%s] %s\n", level, tag, buf);
-        } else {
-            printf("[wifi][%u] %s\n", level, buf);
-        }
-    }
-}
-
-static void espradio_log_write(unsigned int level, const char* tag, const char* format, ...) {
-    va_list args;
-    va_start(args, format);
-    espradio_log_writev(level, tag, format, args);
-    va_end(args);
-}
+/* Use libprintf's own __esp_radio_log_write / __esp_radio_log_writev as the
+ * OSI _log_write / _log_writev callbacks.  The blob (GCC) calls these
+ * function pointers with its own varargs ABI; libprintf (also GCC) reads
+ * them with the matching ABI, so no Clang vararg lowering is involved.
+ * The formatted output is funneled through __esp_radio_printf (fixed-arg)
+ * which we provide in printf_shim.c. */
+extern void __esp_radio_log_write(unsigned int level, const char* tag, const char* format, ...);
+extern void __esp_radio_log_writev(unsigned int level, const char* tag, const char* format, va_list args);
 
 uint32_t espradio_log_timestamp(void);
 
@@ -1067,7 +1060,7 @@ static void * espradio_malloc_internal(size_t size) {
     void *ret = espradio_arena_alloc(size);
 #if ESPRADIO_OSI_DEBUG
     printf("osi: malloc_internal %zu -> %p (caller=%p)\n", size, ret, __builtin_return_address(0));
-    fflush(stdout);
+    /* ets_printf is unbuffered — no flush needed. */
 #endif
     return ret;
 }
@@ -1133,7 +1126,7 @@ static void * espradio_wifi_zalloc(size_t size) {
     void *ret = espradio_arena_calloc(1, size);
 #if ESPRADIO_OSI_DEBUG
     printf(" -> %p\n", ret);
-    fflush(stdout);
+    /* ets_printf is unbuffered — no flush needed. */
 #endif
     return ret;
 }
@@ -1379,6 +1372,12 @@ static int espradio_coex_adapter_xtal_freq_get(void) {
 
 coex_adapter_funcs_t g_coex_adapter_funcs = {
     ._version = COEX_ADAPTER_VERSION,
+#if CONFIG_IDF_TARGET_ESP32
+    ._spin_lock_create = espradio_spin_lock_create,
+    ._spin_lock_delete = espradio_spin_lock_delete,
+    ._int_disable = espradio_wifi_int_disable,
+    ._int_enable = espradio_wifi_int_restore,
+#endif
     ._task_yield_from_isr = espradio_coex_adapter_task_yield_from_isr,
     ._semphr_create = espradio_coex_adapter_semphr_create,
     ._semphr_delete = espradio_coex_adapter_semphr_delete,
@@ -1516,6 +1515,10 @@ wifi_osi_funcs_t espradio_osi_funcs = {
     ._wifi_apb80m_release = espradio_wifi_apb80m_release,
     ._phy_disable = espradio_phy_disable,
     ._phy_enable = espradio_phy_enable,
+#if CONFIG_IDF_TARGET_ESP32 || CONFIG_IDF_TARGET_ESP32S2 || CONFIG_ESP_WIFI_TARGET_ESP32
+    ._phy_common_clock_enable = esp_phy_common_clock_enable,
+    ._phy_common_clock_disable = esp_phy_common_clock_disable,
+#endif
     ._phy_update_country_info = espradio_phy_update_country_info,
     ._read_mac = espradio_read_mac,
     ._timer_arm = espradio_timer_arm,
@@ -1544,9 +1547,11 @@ wifi_osi_funcs_t espradio_osi_funcs = {
     ._get_random = espradio_get_random,
     ._get_time = espradio_get_time,
     ._random = espradio_random,
+#if !CONFIG_IDF_TARGET_ESP32 && !CONFIG_ESP_WIFI_TARGET_ESP32
     ._slowclk_cal_get = espradio_slowclk_cal_get,
-    ._log_write = espradio_log_write,
-    ._log_writev = espradio_log_writev,
+#endif
+    ._log_write = __esp_radio_log_write,
+    ._log_writev = __esp_radio_log_writev,
     ._log_timestamp = espradio_log_timestamp,
     ._malloc_internal = espradio_malloc_internal,
     ._realloc_internal = espradio_realloc_internal,

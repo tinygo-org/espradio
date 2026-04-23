@@ -108,7 +108,22 @@ func startSchedTicker() {
 
 var wifiInitDone uint32
 
+// traceSched controls whether schedOnce emits per-phase TRACE lines.
+// Enable only while diagnosing async crashes — very noisy at 5ms rate.
+var traceSched atomic.Uint32
+
+// schedMu serializes schedOnce.  The blob's ISR / queue / timer / event
+// dispatch is not re-entrant; two goroutines running schedOnce concurrently
+// (ticker + Start/Connect pump loops) corrupt blob-internal state and cause
+// LoadProhibited crashes (function pointers read mid-update land in rodata).
+// Manual pump loops in Start()/Connect() are kept for pump throughput — the
+// mutex just prevents concurrent execution, not total pump count.
+var schedMu sync.Mutex
+
 func schedOnce() {
+	schedMu.Lock()
+	defer schedMu.Unlock()
+
 	// Mask WiFi CPU interrupt before the ISR softcall.  On Xtensa (ESP32-S3)
 	// the WiFi interrupt is level-triggered at level 1.  If the MAC asserts
 	// its interrupt while we're already iterating the ISR handlers below,
@@ -138,11 +153,13 @@ func schedOnce() {
 	for i := 0; i < 4; i++ {
 		C.espradio_event_loop_run_once()
 	}
+
 	for i := 0; i < 4; i++ {
 		if C.espradio_timer_poll_due(8) == 0 {
 			break
 		}
 	}
+
 	for i := 0; i < 4; i++ {
 		if C.espradio_esp_timer_poll_due(8) == 0 {
 			break
@@ -186,33 +203,46 @@ func Enable(config Config) error {
 	arenaPool = make([]byte, poolSize)
 	C.espradio_arena_init((*C.uint8_t)(unsafe.Pointer(&arenaPool[0])), C.size_t(poolSize))
 
+	println("enable: startSchedTicker")
 	startSchedTicker()
 	time.Sleep(schedTickerMs * time.Millisecond)
+	println("enable: initHardware")
 	initHardware()
+	println("enable: ensure_osi_ptr")
 	C.espradio_ensure_osi_ptr()
 
+	println("enable: install wifiISR")
 	wifiISR = interrupt.New(wifiCPUInterrupt, wifiISRHandler)
 	wifiISR.Enable()
 	C.espradio_wifi_int_raise_priority()
 
+	println("enable: prewire_wifi_interrupts")
 	C.espradio_prewire_wifi_interrupts()
 
+	println("enable: event_register_default_cb")
 	C.espradio_event_register_default_cb()
+	println("enable: set_blob_log_level")
 	C.espradio_set_blob_log_level(C.uint32_t(config.Logging))
 
+	println("enable: hal_init_clocks_go")
 	mask := interrupt.Disable()
 	C.espradio_hal_init_clocks_go()
 	interrupt.Restore(mask)
 
+	println("enable: wifi_init")
 	errCode := C.espradio_wifi_init()
+	println("enable: wifi_init returned", int32(errCode))
 	if errCode != 0 {
 		return makeError(errCode)
 	}
+	println("enable: wifi_init_completed")
 	C.espradio_wifi_init_completed()
 	C.espradio_wifi_int_to_level()
 	atomic.StoreUint32(&wifiInitDone, 1)
 	schedOnce()
+	println("enable: netif_init_netstack_cb")
 	C.espradio_netif_init_netstack_cb()
+	println("enable: done")
 
 	return nil
 }
@@ -336,8 +366,15 @@ func Connect(cfg STAConfig) error {
 		return makeError(code)
 	}
 
-	if code := C.esp_wifi_connect_internal(); code != C.ESP_OK {
-		return makeError(code)
+	// Turn on schedOnce per-phase tracing for the duration of the handshake
+	// so we can see which phase (ISR poll, queue drain, event loop, timers)
+	// was active when an async crash hit.
+	traceSched.Store(1)
+	defer traceSched.Store(0)
+
+	connectCode := C.esp_wifi_connect_internal()
+	if connectCode != C.ESP_OK {
+		return makeError(connectCode)
 	}
 
 	select {
@@ -362,8 +399,8 @@ func Connect(cfg STAConfig) error {
 func espradio_on_wifi_event(eventID int32, data unsafe.Pointer) {
 	switch eventID {
 	case C.WIFI_EVENT_STA_CONNECTED:
-		C.espradio_netif_set_connected(1)
 		ev := (*C.wifi_event_sta_connected_t)(data)
+		C.espradio_netif_set_connected(1)
 		ssidLen := int(ev.ssid_len)
 		if ssidLen > 32 {
 			ssidLen = 32
@@ -380,8 +417,8 @@ func espradio_on_wifi_event(eventID int32, data unsafe.Pointer) {
 		}
 
 	case C.WIFI_EVENT_STA_DISCONNECTED:
-		C.espradio_netif_set_connected(0)
 		ev := (*C.wifi_event_sta_disconnected_t)(data)
+		C.espradio_netif_set_connected(0)
 		connectMu.Lock()
 		ch := connectResult
 		connectMu.Unlock()

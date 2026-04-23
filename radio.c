@@ -8,8 +8,15 @@
 #define ESPRADIO_RADIO_DEBUG 0
 #endif
 
+/* All diagnostic output goes through ets_printf (ROM, %d/%x/%p/%s/%c).
+ * Never call libprintf.a's printf/vprintf/vsnprintf from Clang code — its
+ * varargs ABI doesn't match Clang-Xtensa and produces garbage or crashes.
+ * Blob-internal logging stays GCC->GCC via libprintf and surfaces through
+ * __esp_radio_printf (in printf_shim.c). */
+extern int ets_printf(const char *fmt, ...);
+
 #if ESPRADIO_RADIO_DEBUG
-#define RADIO_DBG(...) printf(__VA_ARGS__)
+#define RADIO_DBG(...) ets_printf(__VA_ARGS__)
 #else
 #define RADIO_DBG(...) ((void)0)
 #endif
@@ -115,7 +122,10 @@ void espradio_rom_hooks_init(void) {
 
     /* Enable ROM printf via UART and install global lock callbacks. */
     ets_install_uart_printf();
+#if !CONFIG_IDF_TARGET_ESP32
+    /* ets_install_lock is not available in the ESP32 ROM. */
     ets_install_lock(ets_intr_lock, ets_intr_unlock);
+#endif
 }
 
 /* Disable ALL watchdog timers so that if the CPU hangs or faults, we get
@@ -129,6 +139,36 @@ void espradio_rom_hooks_init(void) {
  * entire RTC domain.  ESP-IDF disables these during normal startup. */
 static void espradio_disable_all_wdt(void) {
 #ifdef __XTENSA__
+#if CONFIG_IDF_TARGET_ESP32
+    /* ESP32: peripherals at 0x3FFxxxxx (NOT 0x6000xxxx like S3/C3).
+     * No clock/power glitch detectors, no FIB_SEL, no Super WDT. */
+
+    /* --- Brownout detector --- */
+    /* RTC_CNTL_BROWN_OUT_REG = 0x3FF480D4, bit 30 = ENA, bit 26 = RST_ENA */
+    *(volatile uint32_t *)0x3FF480D4 &= ~((1u << 30) | (1u << 26));  /* disable BOD + BOD reset */
+
+    /* --- RTC WDT --- */
+    /* RTC_CNTL_WDTWPROTECT_REG = 0x3FF480A4, key = 0x50D83AA1 */
+    /* RTC_CNTL_WDTCONFIG0_REG  = 0x3FF4808C, bit 31 = WDT_EN */
+    *(volatile uint32_t *)0x3FF480A4 = 0x50D83AA1;          /* unlock */
+    *(volatile uint32_t *)0x3FF4808C &= ~(1u << 31);        /* WDT_EN=0 */
+    *(volatile uint32_t *)0x3FF480A4 = 0;                   /* re-lock */
+
+    /* --- Timer Group 0 MWDT --- */
+    /* TIMG_WDTWPROTECT_REG(0) = 0x3FF5F064, key = 0x50D83AA1 */
+    /* TIMG_WDTCONFIG0_REG(0)  = 0x3FF5F048, bit 31 = WDT_EN */
+    *(volatile uint32_t *)0x3FF5F064 = 0x50D83AA1;          /* unlock */
+    *(volatile uint32_t *)0x3FF5F048 &= ~(1u << 31);        /* WDT_EN=0 */
+    *(volatile uint32_t *)0x3FF5F064 = 0;                   /* re-lock */
+
+    /* --- Timer Group 1 MWDT --- */
+    /* TIMG_WDTWPROTECT_REG(1) = 0x3FF60064, key = 0x50D83AA1 */
+    /* TIMG_WDTCONFIG0_REG(1)  = 0x3FF60048, bit 31 = WDT_EN */
+    *(volatile uint32_t *)0x3FF60064 = 0x50D83AA1;          /* unlock */
+    *(volatile uint32_t *)0x3FF60048 &= ~(1u << 31);        /* WDT_EN=0 */
+    *(volatile uint32_t *)0x3FF60064 = 0;                   /* re-lock */
+
+#else /* ESP32-S3: peripherals at 0x6000xxxx */
     /* --- Clock glitch detector --- */
     /* RTC_CNTL_ANA_CONF_REG = 0x60008034, bit 20 = GLITCH_RST_EN */
     *(volatile uint32_t *)0x60008034 &= ~(1u << 20);        /* GLITCH_RST_EN=0 */
@@ -175,6 +215,7 @@ static void espradio_disable_all_wdt(void) {
     *(volatile uint32_t *)0x60020064 = 0x50D83AA1;          /* unlock */
     *(volatile uint32_t *)0x60020048 &= ~(1u << 31);        /* WDT_EN=0 */
     *(volatile uint32_t *)0x60020064 = 0;                   /* re-lock */
+#endif /* CONFIG_IDF_TARGET_ESP32 */
 
 #else /* RISC-V (ESP32-C3) — different RTC_CNTL offsets, same TIMG offsets */
 
@@ -222,6 +263,13 @@ esp_err_t espradio_wifi_init(void) {
     espradio_rom_hooks_init();
 
     espradio_disable_all_wdt();
+
+#if CONFIG_IDF_TARGET_ESP32
+    extern void espradio_phy_adapter_reset(void);
+    ets_printf("espradio: calling phy_adapter_reset\n");
+    espradio_phy_adapter_reset();
+    ets_printf("espradio: phy_adapter_reset done\n");
+#endif
 
     RADIO_DBG("espradio: before esp_wifi_bt_power_domain_on\n");
     esp_wifi_bt_power_domain_on();
@@ -318,14 +366,40 @@ esp_err_t espradio_wifi_init(void) {
     extern void espradio_coex_adapter_init(void);
     espradio_coex_adapter_init();
     RADIO_DBG("espradio: after coex_adapter_init\n");
+    /* coex_pre_init is only required when WiFi/BT coexistence is active.
+     * On ESP32 the libcoexist.a version crashes in coex_core_pre_init
+     * (likely reading uninitialised .dram1 literals).  Since nothing in the
+     * blobs references coex_pre_init (only we do), skip it for WiFi-only
+     * on ESP32.  Keep it enabled on S3/C3 where it currently works. */
+#if !CONFIG_IDF_TARGET_ESP32
     extern esp_err_t coex_pre_init(void);
     RADIO_DBG("espradio: calling coex_pre_init\n");
     esp_err_t coex_rc = coex_pre_init();
     RADIO_DBG("espradio: coex_pre_init returned %d\n", (int)coex_rc);
+#else
+    RADIO_DBG("espradio: skipping coex_pre_init on ESP32\n");
+#endif
     RADIO_DBG("espradio: before esp_wifi_init_internal cfg.osi_funcs=%p\n", (void*)cfg.osi_funcs);
 
+#if CONFIG_IDF_TARGET_ESP32
+    {
+        extern uint32_t espradio_phy_adapter_get_calibrated(void);
+        extern uint32_t espradio_phy_adapter_get_calibrated_addr(void);
+        ets_printf("espradio: before init calib_addr=0x%x\n",
+                   (unsigned)espradio_phy_adapter_get_calibrated_addr());
+        ets_printf("espradio: before init calib_val=%d\n",
+                   (int)espradio_phy_adapter_get_calibrated());
+    }
+#endif
     esp_err_t ret = esp_wifi_init_internal(&cfg);
     RADIO_DBG("espradio: esp_wifi_init_internal returned %d\n", (int)ret);
+#if CONFIG_IDF_TARGET_ESP32
+    {
+        extern uint32_t espradio_phy_adapter_get_calibrated(void);
+        ets_printf("espradio: after esp_wifi_init_internal calib_val=0x%x\n",
+                   (unsigned)espradio_phy_adapter_get_calibrated());
+    }
+#endif
 
     if (ret == 0) {
         extern void esp_phy_modem_init(void);
@@ -348,44 +422,10 @@ void espradio_wifi_init_completed(void) {
  * where esp_event_base_t = const char*. Here we provide the same definition without linking libesp_event. */
 esp_event_base_t const WIFI_EVENT = "WIFI_EVENT";
 
-__attribute__((weak)) void net80211_printf(const char *format, ...) {
-#if ESPRADIO_RADIO_DEBUG
-    va_list args;
-    va_start(args, format);
-    printf("espradio net80211: ");
-    vprintf(format, args);
-    va_end(args);
-#else
-    (void)format;
-#endif
-}
-
-static volatile uint32_t s_phy_printf_count;
-
-__attribute__((weak)) void phy_printf(const char *format, ...) {
-#if ESPRADIO_RADIO_DEBUG
-    uint32_t n = s_phy_printf_count++;
-    va_list args;
-    va_start(args, format);
-    printf("espradio phy: [%lu] ", (unsigned long)n);
-    vprintf(format, args);
-    va_end(args);
-#else
-    (void)format;
-#endif
-}
-
-__attribute__((weak)) void pp_printf(const char *format, ...) {
-#if ESPRADIO_RADIO_DEBUG
-    va_list args;
-    va_start(args, format);
-    printf("espradio pp: ");
-    vprintf(format, args);
-    va_end(args);
-#else
-    (void)format;
-#endif
-}
+/* Dead weak overrides for net80211_printf / phy_printf / pp_printf were
+ * removed: libprintf.a provides STRONG versions of these, so our weak ones
+ * never linked.  All output flows blob -> libprintf -> __esp_radio_printf
+ * (in printf_shim.c) -> ets_printf.  No Clang -> libprintf varargs hop. */
 
 esp_err_t espradio_set_country_eu_manual(void) {
     wifi_country_t c;

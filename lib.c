@@ -1,9 +1,11 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
-#include <stdio.h>
 
 #include "include.h"
+
+/* ROM printf only — never libprintf.a (varargs broken from Clang). */
+extern int ets_printf(const char *fmt, ...);
 
 extern uint64_t espradio_time_us_now(void);
 extern void espradio_task_delay(uint32_t ticks);
@@ -52,7 +54,7 @@ int usleep(unsigned int us) {
 }
 
 void __assert_func(const char *file, int line, const char *func, const char *expr) {
-    printf("ASSERT FAILED: %s:%d %s: %s\n", file, line, func ? func : "", expr ? expr : "");
+    ets_printf("ASSERT FAILED: %s:%d %s: %s\n", file, line, func ? func : "", expr ? expr : "");
     while (1) {}
 }
 

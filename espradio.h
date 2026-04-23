@@ -78,7 +78,7 @@ extern void espradio_hal_reset_wifi_mac_go(void);
 extern int espradio_hal_read_mac_go(unsigned char *mac, unsigned int iftype);
 extern void espradio_on_wifi_event(int32_t eventID, void *data);
 
-/* ===== chip-specific → linker (implemented in esp32c3/ or esp32s3/ *.c) ===== */
+/* ===== chip-specific → linker (implemented in esp32/, esp32c3/, or esp32s3/ *.c) ===== */
 extern void esp_phy_enable(esp_phy_modem_t modem);
 extern void esp_phy_disable(esp_phy_modem_t modem);
 

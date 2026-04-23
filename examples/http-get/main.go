@@ -22,6 +22,7 @@ var (
 
 func main() {
 	// wait a bit for serial
+	println("hello")
 	time.Sleep(2 * time.Second)
 
 	link := link.Esplink{}

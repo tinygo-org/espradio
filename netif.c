@@ -20,7 +20,11 @@ static void netstack_buf_free_noop(void *buf)  { (void)buf; }
  * addresses (assigned in the linker script).  They start as zero.  If the
  * blob calls through any of them before someone writes a valid address,
  * we get pc:nil.  Write a safe no-op into every callback-shaped variable
- * that the blob might call unconditionally. */
+ * that the blob might call unconditionally.
+ *
+ * These variables are ESP32-S3/C3 specific — the original ESP32 blobs
+ * manage callbacks through proper API calls instead. */
+#if !CONFIG_IDF_TARGET_ESP32
 extern void (*g_config_func)(void);
 extern void (*g_net80211_tx_func)(void);
 extern void (*g_timer_func)(void);
@@ -29,6 +33,7 @@ extern void (*wifi_sta_rx_probe_req)(void);
 extern void (*g_tx_done_cb_func)(void);
 extern void (*s_encap_amsdu_func)(void);
 extern void (*mesh_rxcb)(void);
+#endif /* !CONFIG_IDF_TARGET_ESP32 */
 
 static void blob_cb_noop(void) { }
 
@@ -64,6 +69,7 @@ extern void *g_phyFuns;
  * irrelevant — wrap it to always return 0 ("idle") and avoid the crash. */
 int __wrap_ppCheckTxConnTrafficIdle(void) { return 0; }
 
+#if !CONFIG_IDF_TARGET_ESP32
 /* ROM-fixed pointer variables in the 0x3fcef9xx region that are critical for
  * TX operations.  WiFi DMA can corrupt these the same way it corrupts
  * pp_wdev_funcs.  We snapshot them after the blob finishes init and restore
@@ -80,6 +86,7 @@ static uint32_t s_saved_our_wait_eb;
 static uint32_t s_saved_lmacConfMib_ptr;
 static uint32_t s_saved_g_osi_funcs_p;
 static int      s_rom_ptrs_saved;
+#endif /* !CONFIG_IDF_TARGET_ESP32 */
 
 /* Forward declaration — defined below. */
 static esp_err_t espradio_sta_rxcb(void *buffer, uint16_t len, void *eb);
@@ -94,6 +101,7 @@ static void espradio_tx_done_noop(uint8_t ifidx, uint8_t *data,
     (void)ifidx; (void)data; (void)data_len; (void)txStatus;
 }
 
+#if !CONFIG_IDF_TARGET_ESP32
 static void espradio_patch_blob_cb_vars(void) {
     /* Patch all callback-shaped blob variables that might still be NULL. */
     if (!g_config_func)             g_config_func = blob_cb_noop;
@@ -105,11 +113,14 @@ static void espradio_patch_blob_cb_vars(void) {
     if (!s_encap_amsdu_func)        s_encap_amsdu_func = blob_cb_noop;
     if (!mesh_rxcb)                 mesh_rxcb = blob_cb_noop;
 }
+#endif
 
 void espradio_netif_init_netstack_cb(void) {
     esp_wifi_internal_reg_netstack_buf_cb(netstack_buf_ref_noop,
                                           netstack_buf_free_noop);
+#if !CONFIG_IDF_TARGET_ESP32
     espradio_patch_blob_cb_vars();
+#endif
     
     /* Missing initialization steps required before esp_wifi_start() */
     esp_wifi_set_mode(WIFI_MODE_NULL);
@@ -122,7 +133,9 @@ void espradio_netif_init_netstack_cb(void) {
  * the blob may have reset, register the TX-done callback via the
  * official API, and register an AP-mode RX callback. */
 void espradio_post_start_cb(void) {
+#if !CONFIG_IDF_TARGET_ESP32
     espradio_patch_blob_cb_vars();
+#endif
     esp_wifi_set_tx_done_cb(espradio_tx_done_noop);
     /* Disable power save — the blob's PM code (pm_tbtt_process) calls through
      * OSI function pointers in ways that can crash without a full FreeRTOS
@@ -131,6 +144,7 @@ void espradio_post_start_cb(void) {
     /* Register AP rxcb too (blob may call it even in STA mode). */
     esp_wifi_internal_reg_rxcb(WIFI_IF_AP, espradio_sta_rxcb);
 
+#if !CONFIG_IDF_TARGET_ESP32
     /* Check whether the blob moved g_osi_funcs_p away from our table. */
     extern wifi_osi_funcs_t espradio_osi_funcs;
     extern wifi_osi_funcs_t g_wifi_osi_funcs;
@@ -173,6 +187,7 @@ void espradio_post_start_cb(void) {
             s_phyFuns_save[i] = rom_table[i];
         g_phyFuns = s_phyFuns_save;
     }
+#endif /* !CONFIG_IDF_TARGET_ESP32 */
 }
 
 /* Snapshot the critical ROM pointers after the blob has fully initialised
@@ -180,17 +195,20 @@ void espradio_post_start_cb(void) {
  * Called from Go after pumping schedOnce enough times for ppTask to
  * process the START command. */
 void espradio_save_rom_ptrs(void) {
+#if !CONFIG_IDF_TARGET_ESP32
     s_saved_pTxRx          = (uint32_t)(uintptr_t)pTxRx;
     s_saved_our_tx_eb      = (uint32_t)(uintptr_t)our_tx_eb;
     s_saved_our_wait_eb    = (uint32_t)(uintptr_t)our_wait_eb;
     s_saved_lmacConfMib_ptr = (uint32_t)(uintptr_t)lmacConfMib_ptr;
     s_saved_g_osi_funcs_p  = (uint32_t)(uintptr_t)g_osi_funcs_p;
     s_rom_ptrs_saved = 1;
+#endif
 }
 
 /* Restore the ROM pointers from snapshot.  Called from schedOnce (Go side)
  * and before every TX to undo any DMA corruption in the ROM data area. */
 void espradio_restore_rom_ptrs(void) {
+#if !CONFIG_IDF_TARGET_ESP32
     if (!s_rom_ptrs_saved) return;
     if ((uint32_t)(uintptr_t)pTxRx != s_saved_pTxRx)
         pTxRx = (volatile uint32_t *)(uintptr_t)s_saved_pTxRx;
@@ -206,6 +224,7 @@ void espradio_restore_rom_ptrs(void) {
      * Redirect it back to our static copy. */
     if (g_phyFuns != s_phyFuns_save && s_phyFuns_save[0] != 0)
         g_phyFuns = s_phyFuns_save;
+#endif
 }
 
 #define ESPRADIO_NETIF_RXRING_SIZE  8

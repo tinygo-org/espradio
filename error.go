@@ -45,6 +45,8 @@ func (e Error) Error() string {
 			return "espradio: auth expired"
 		case 15:
 			return "espradio: 4-way handshake timeout"
+		case 200:
+			return "espradio: beacon timeout"
 		case 201:
 			return "espradio: AP not found"
 		case 202:
@@ -55,6 +57,20 @@ func (e Error) Error() string {
 			return "espradio: handshake timeout"
 		case 205:
 			return "espradio: connection failed"
+		case 206:
+			return "espradio: AP TSF reset"
+		case 207:
+			return "espradio: roaming"
+		case 208:
+			return "espradio: association comeback time too long"
+		case 209:
+			return "espradio: SA query timeout"
+		case 210:
+			return "espradio: no AP found with compatible security"
+		case 211:
+			return "espradio: no AP found in auth mode threshold"
+		case 212:
+			return "espradio: no AP found in RSSI threshold"
 		default:
 			return "espradio: error " + strconv.FormatInt(int64(int32(e)), 10)
 		}

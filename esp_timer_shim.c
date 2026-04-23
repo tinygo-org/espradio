@@ -4,6 +4,9 @@
 #include <string.h>
 #include "blobs/include/esp_timer.h"
 
+/* ROM printf only — never libprintf.a (varargs broken from Clang). */
+extern int ets_printf(const char *fmt, ...);
+
 #ifndef ESPRADIO_TIMER_SHIM_DEBUG
 #define ESPRADIO_TIMER_SHIM_DEBUG 0
 #endif
@@ -137,8 +140,8 @@ int espradio_esp_timer_poll_due(int max_fire) {
         }
         uintptr_t cb_addr = (uintptr_t)t->callback;
         if (cb_addr < 0x40000000u || cb_addr >= 0x42800000u) {
-            printf("esp_timer: BAD callback=%p arg=%p — skipping\n",
-                   (void *)t->callback, t->arg);
+            ets_printf("esp_timer: BAD callback=%p arg=%p -- skipping\n",
+                       (void *)t->callback, t->arg);
             t->active = false;
             continue;
         }
