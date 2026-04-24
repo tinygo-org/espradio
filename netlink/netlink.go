@@ -2,7 +2,6 @@ package netlink
 
 import (
 	"errors"
-	"machine"
 	"net"
 	"net/netip"
 	"sync"
@@ -130,9 +129,6 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 		})
 
 		n.berkeley = *xnet.NewBerkeleyStack(gostack.Socket)
-		if debug {
-			n.netstack.EnablePacketCaptureTo(machine.Serial)
-		}
 		go handleStack(espstack)
 	})
 	err = n.doDHCP()

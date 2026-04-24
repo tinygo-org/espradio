@@ -2,4 +2,4 @@
 
 package netlink
 
-var debug = true
+const debug = true

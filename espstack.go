@@ -2,7 +2,6 @@ package espradio
 
 import (
 	"errors"
-	"io"
 	"net/netip"
 	"time"
 
@@ -17,7 +16,6 @@ type Stack struct {
 	dev        *NetDev
 	rxtxBuf    []byte
 	enablePcap bool
-	pcap       xnet.CapturePrinter
 }
 
 // StackConfig configures the lneto-based network stack.
@@ -70,17 +68,6 @@ func NewStack(dev *NetDev, cfg StackConfig) (*Stack, error) {
 	return stack, nil
 }
 
-func (stack *Stack) EnablePacketCaptureTo(w io.Writer) {
-	stack.enablePcap = w != nil
-	if w != nil {
-		stack.pcap.Configure(w, xnet.CapturePrinterConfig{
-			NamespaceWidth: 3, // "IN ", "OUT"
-			TimePrecision:  3,
-			Now:            time.Now,
-		})
-	}
-}
-
 // LnetoStack returns the underlying lneto async stack for advanced use.
 func (stack *Stack) LnetoStack() *xnet.StackAsync {
 	return &stack.s
@@ -95,8 +82,8 @@ func (stack *Stack) Hostname() string {
 // outgoing frames. Returns the number of bytes sent and received.
 func (stack *Stack) RecvAndSend() (send, recv int, err error) {
 	recv, errrecv := stack.dev.EthPoll(stack.rxtxBuf)
-	if stack.enablePcap && recv > 0 {
-		stack.pcap.PrintPacket("IN", stack.rxtxBuf[:recv])
+	if pcapdebug && recv > 0 {
+		printPacket("IN", stack.rxtxBuf[:recv])
 	}
 	send, err = stack.s.EgressEthernet(stack.rxtxBuf)
 	if err != nil {
@@ -106,8 +93,8 @@ func (stack *Stack) RecvAndSend() (send, recv int, err error) {
 	}
 	if send == 0 {
 		return send, recv, err
-	} else if stack.enablePcap {
-		stack.pcap.PrintPacket("OUT", stack.rxtxBuf[:send])
+	} else if pcapdebug {
+		printPacket("OUT", stack.rxtxBuf[:send])
 	}
 
 	err = stack.dev.SendEthFrame(stack.rxtxBuf[:send])
