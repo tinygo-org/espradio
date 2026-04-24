@@ -387,8 +387,8 @@ To update these dependencies to the latest version, run the `make update` comman
 
 ## Debugging
 
-- `netlinkdebug`: enables printing of netlink actions
-- `pcapdebug`
+- `netlinkdebug`: enables printing of netlink actions (webserver example)
+- `pcapdebug`: enables logging of all packets sent and received (all examples)
 ```sh
 tinygo flash -target=xiao-esp32c3 -tags=netlinkdebug,pcapdebug ./examples/webserver
 ```
