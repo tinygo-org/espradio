@@ -12,10 +12,9 @@ import (
 
 // Stack wraps an lneto async network stack on top of a NetDev (EthernetDevice).
 type Stack struct {
-	s          xnet.StackAsync
-	dev        *NetDev
-	rxtxBuf    []byte
-	enablePcap bool
+	s       xnet.StackAsync
+	dev     *NetDev
+	rxtxBuf []byte
 }
 
 // StackConfig configures the lneto-based network stack.
