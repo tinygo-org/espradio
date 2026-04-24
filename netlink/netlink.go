@@ -95,9 +95,10 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 	}
 
 	espstack, err := espradio.NewStack(nd, espradio.StackConfig{
-		Hostname:    params.Ssid,
-		MaxUDPPorts: 2,
-		MaxTCPPorts: 1,
+		Hostname:     params.Ssid,
+		MaxUDPPorts:  2,
+		MaxTCPPorts:  1,
+		PassivePeers: 3,
 	})
 	if err != nil {
 		if debug {

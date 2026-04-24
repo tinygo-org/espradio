@@ -8,3 +8,5 @@ require (
 )
 
 require github.com/soypat/natiu-mqtt v0.6.0
+
+replace github.com/soypat/lneto => ../lneto

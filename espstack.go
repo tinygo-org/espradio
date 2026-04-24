@@ -22,10 +22,11 @@ type StackConfig struct {
 	StaticAddress netip.Addr
 	DNSServer     netip.Addr
 	NTPServer     netip.Addr
+	RandSeed      int64
 	Hostname      string
 	MaxTCPPorts   int
 	MaxUDPPorts   int
-	RandSeed      int64
+	PassivePeers  int
 }
 
 // DHCPConfig configures DHCP address acquisition.
@@ -56,6 +57,7 @@ func NewStack(dev *NetDev, cfg StackConfig) (*Stack, error) {
 		RandSeed:          time.Now().UnixNano() ^ cfg.RandSeed,
 		HardwareAddress:   mac,
 		MTU:               MTU,
+		PassivePeers:      cfg.PassivePeers,
 	})
 	if err != nil {
 		return nil, err
