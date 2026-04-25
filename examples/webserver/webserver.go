@@ -22,23 +22,6 @@ var indexHTML string
 //go:embed sixlines.html
 var sixlinesHTML string
 
-// indexBefore and indexAfter are the two halves of index.html split at the
-// access counter insertion point.  Populated by init().
-var indexBefore, indexAfter string
-
-const accessMarker = "{{ACCESS}}"
-
-func init() {
-	for i := 0; i <= len(indexHTML)-len(accessMarker); i++ {
-		if indexHTML[i:i+len(accessMarker)] == accessMarker {
-			indexBefore = indexHTML[:i]
-			indexAfter = indexHTML[i+len(accessMarker):]
-			return
-		}
-	}
-	indexBefore = indexHTML
-}
-
 var (
 	ssid     string
 	password string
@@ -49,10 +32,7 @@ func main() {
 	// wait a bit for serial
 	time.Sleep(2 * time.Second)
 
-	link := link.Esplink{
-		// link needs a 48k arena pool to handle the blob allocations for WiFi.
-		ArenaPoolSize: 48 * 1024,
-	}
+	link := link.Esplink{}
 	netdev.UseNetdev(&link)
 
 	println("Connecting to WiFi...")
@@ -88,37 +68,12 @@ func logRequest(h http.HandlerFunc) http.Handler {
 }
 
 func root(w http.ResponseWriter, r *http.Request) {
-	access := 1
-
-	cookie, err := r.Cookie("access")
-	if err != nil {
-		if err == http.ErrNoCookie {
-			cookie = &http.Cookie{
-				Name:  "access",
-				Value: "1",
-			}
-		} else {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-	} else {
-		v, err := strconv.ParseInt(cookie.Value, 10, 0)
-		if err != nil {
-			http.Error(w, "invalid cookie.Value : "+cookie.Value, http.StatusBadRequest)
-			return
-		}
-		cookie.Value = strconv.Itoa(int(v) + 1)
-		access = int(v) + 1
-	}
-	http.SetCookie(w, cookie)
 	w.WriteHeader(http.StatusOK)
-
-	io.WriteString(w, indexBefore)
-	io.WriteString(w, strconv.Itoa(access))
-	io.WriteString(w, indexAfter)
+	io.WriteString(w, indexHTML)
 }
 
 func sixlines(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
 	io.WriteString(w, sixlinesHTML)
 }
 
