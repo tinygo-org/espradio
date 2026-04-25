@@ -1,12 +1,25 @@
 # espradio
 
-TinyGo package for using the ESP32 onboard radio for wireless communication.
+[![PkgGoDev](https://pkg.go.dev/badge/pkg.go.dev/tinygo.org/x/espradio)](https://pkg.go.dev/tinygo.org/x/espradio) [![Build](https://github.com/tinygo-org/espradio/actions/workflows/build.yml/badge.svg)](https://github.com/tinygo-org/espradio/actions/workflows/build.yml)
 
-Already works on the `esp32c3` and `esp32s3` processors for WiFi. More processors coming soon! Bluetooth is still in progress.
+[TinyGo](https://tinygo.org/) package for wireless communication on [Espressif](https://www.espressif.com/) ESP32xx microcontrollers.
+
+Currently supports WiFi on the [`esp32c3`](https://www.espressif.com/en/products/socs/esp32-c3) single-core 32-bit RISC-V MCU and [`esp32s3`](https://www.espressif.com/en/products/socs/esp32-s3) dual-core XTensa LX7 MCU. Bluetooth is in progress, along with more processors.
+
+### Features
+
+- WiFi station (STA) and soft-AP modes
+- WiFi scanning
+- Go stdlib `net` support using the TinyGo `netdev`/`netlink` interface
+- Pure-Go TCP/IP stack with DHCP, DNS, and NTP (uses [`lneto`](https://github.com/soypat/lneto))
+- TCP and UDP Berkeley sockets API
+- Raw Ethernet frame send/receive
+- MQTT client support (uses [`natiu-mqtt`](https://github.com/soypat/natiu-mqtt))
+- QEMU simulation target for ESP32-C3
 
 ## How to use
 
-This code starts a basic webserver running on an ESP32 using `espradio` along with the Go stdlib `net/http` package:
+This code starts a basic webserver running on a [Seeed Studio XIAO-ESP32C3](https://www.seeedstudio.com/Seeed-XIAO-ESP32C3-p-5431.html) using `espradio` along with the Go stdlib `net/http` package:
 
 ```go
 package main
@@ -83,11 +96,17 @@ $ curl -w "\n" http://192.168.1.241/
 hello
 ```
 
+## Features
+
+
+
 ## How it works
 
 `espradio` uses the binary blobs provided by Espressif and calls them directly using TinyGo's built-in CGo support. This allows them to be fast and utilize the well-tested existing binaries for low level radio communication.
 
 On top of that `espradio` then uses the [`lneto`](https://github.com/soypat/lneto) package, a pure Go layer 2 networking stack.
+
+See the [architecture diagram](#architecture) for more details.
 
 ## Examples - `net` package calling `lneto`
 
@@ -104,38 +123,48 @@ tinygo flash -target xiao-esp32s3 -ldflags="-X main.ssid=yourssid -X main.passwo
 Uses the MQTT machine to machine protocol to publish and subscribe to messages with the `broker.hivemq.com` test server. Uses the Go stdlib and the [`natiu-mqtt`](github.com/soypat/natiu-mqtt) package with the `netlink` interface.
 
 ```
-$ tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=yourssid -X main.password=yourpassword" -size short -monitor ./examples/mqtt/
+$ tinygo flash -target xiao-esp32s3 -ldflags="-X main.ssid=yourssid -X main.password=yourpassword" -size short -monitor ./examples/mqtt/
    code    data     bss |   flash     ram
- 701066   22700  279290 |  723766  301990
+ 672497   22956  284464 |  695453  307420
+Connecting to /dev/ttyACM0...
+Connected.
+Detected chip: ESP32-S3
+Loading stub loader...
+Stub running.
+Erasing entire flash...
+Flash erased.
+Attaching SPI flash...
+Configuring flash size...
+Auto-detected flash size: 8MB
+Flash params set to 0x023F
+SHA digest in image updated
+Attaching SPI flash...
+Compressed 695552 bytes to 472382 (68%)
+Flash begin: 472382 bytes at 0x00000000 (29 compressed blocks)
+[##################################################]  100.0%
+Flash complete. Verifying...
+MD5 verified: 468b20c64e138c8786f8b0b669a5d717
 
-Connected to ESP32-C3
-Flashing: 723872/723872 bytes (100%)               
-Connected to /dev/ttyACM0. Press Ctrl-C to exit.                                                          
-load:0x4202c860,len:0x84310
+Device reset.
+Connected to /dev/ttyACM0. Press Ctrl-C to exit.
+load:0x4202db20,len:0x7c1b8
 SHA-256 comparison failed:
-Calculated: 6bc25eb465fa7599f460725ba7ca7550c86094cb2addfb1fe513499539e0bdd5                                                                                                                                        
-Expected: c4e21f71423096b6072c04d6e2e0c1c8809ea7dc92c5394e6ebba6a0dea25a79                                                                                                                                          
-Attempting to boot anyway...              
-entry 0x40398dc4                          
-Connecting to WiFi... 
-Connected to WiFi.                   
-ClientId: tinygo-client-BFEIHFDOCT   
+Calculated: 716b35e13bffed22f2ce7fc865c81242c3bcf494fb3481bab12494585e0cfac9
+Expected: 09eb25d79a2297f382faa0f8b842998881cd4a2474e9e80eb215799c7ddef1a6
+Attempting to boot anyway...
+entry 0x40386c8c
+Connecting to WiFi...
+Connected to WiFi.
+ClientId: tinygo-client-WYVKRWBJRP
 Connecting to MQTT broker at broker.hivemq.com:1883
-TCP connected to 35.157.137.172:1883
-Sending MQTT CONNECT...                                                                                   
-MQTT CONNECT succeeded                                                                                    
-Subscribed to topic cpu/usage                                                                             
-Message Random value: 45 received on topic cpu/usage                                                      
-Message Random value: 54 received on topic cpu/usage
-Message Random value: 62 received on topic cpu/usage
-Message Random value: 41 received on topic cpu/usage
-Message Random value: 68 received on topic cpu/usage
-Message Random value: 36 received on topic cpu/usage
-Message Random value: 22 received on topic cpu/usage
-Message Random value: 73 received on topic cpu/usage
-Message Random value: 27 received on topic cpu/usage
-Message Random value: 86 received on topic cpu/usage                                                      
-Disconnected from MQTT broker.
+TCP connected to 3.122.68.120:1883
+Sending MQTT CONNECT...
+MQTT CONNECT succeeded
+Subscribed to topic cpu/usage
+Message Random value: 34 received on topic cpu/usage
+Message Random value: 8 received on topic cpu/usage
+Message Random value: 32 received on topic cpu/usage
+...
 ```
 
 ### webserver
@@ -145,18 +174,38 @@ Disconnected from MQTT broker.
 Runs a webserver using the Go `net/http` package using the `netlink` interface:
 
 ```
-$ tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=yourssid -X main.password=yourpassword" -stack-size 8kb -monitor ./examples/webserver/
-Connected to ESP32-C3
-Flashing: 953984/953984 bytes (100%)
-Connected to /dev/ttyACM0. Press Ctrl-C to exit.
-load:0x403918e4,len:0xa474
-load:0x42037c0c,len:0xb1248
+$ tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=yourssid -X main.password=yourpassword" -size short -monitor ./examples/webserver/
+   code    data     bss |   flash     ram
+ 932780   34484  353934 |  967264  388418
+Connecting to /dev/ttyACM0...                
+Connected.                                                                                                
+Detected chip: ESP32-C3
+Loading stub loader...                                                                                                                                                                                              
+Stub running.                                                                                             
+Erasing entire flash...        
+Flash erased.                      
+Attaching SPI flash...                                                                                    
+Configuring flash size...     
+Auto-detected flash size: 4MB                                                                             
+Flash params set to 0x022F              
+SHA digest in image updated                                                                               
+Attaching SPI flash...                                                                                    
+Compressed 967360 bytes to 624318 (65%)                                                                   
+Flash begin: 624318 bytes at 0x00000000 (39 compressed blocks)
+[##################################################]  100.0%
+Flash complete. Verifying...                                                                              
+MD5 verified: 530da6d941a937d248fce4dbb88d420b                                                            
+                                                                                                          
+Device reset.                                      
+Connected to /dev/ttyACM0. Press Ctrl-C to exit.                                                          
+load:0x3fc8a7b0,len:0x86b4                                                                                
+load:0x40392e64,len:0xa474                                                                                
+load:0x4203905c,len:0xb3240
 SHA-256 comparison failed:
-Calculated: 87698da75b5f09de7723e8650f1c84416180cfad80a2800e1adeb04c6d6f2087
-Expected:
-2ca7343abec2d068cbb8f39247e44d8aca94e5f0b78f623c7b7eb8981d8499cc
+Calculated: 698a9fd323776b909347315bd8e6dec519318ba17be4685ce367bea2464e5b27
+Expected: a8fdd97c926ffa40023343a82e4366b1d7103db2214b1607bd34dac4225c78f7
 Attempting to boot anyway...
-entry 0x4039bd14
+entry 0x4039d294
 Connecting to WiFi...
 HTTP server listening on http://192.168.1.46:80
 ```
@@ -306,9 +355,40 @@ AP: rems RSSI -79
 
 Starts the ESP32 radio.
 
+## Architecture
+
+```mermaid
+flowchart TD
+    A["User Application"]
+    B["espradio/netlink"]
+    C["espradio Stack"]
+    D["espradio NetDev"]
+    E["CGo Bridge"]
+    F["Espressif Binary Blobs"]
+    G["ESP32 Radio Hardware"]
+
+    A --Go net/http or lneto API--> B --Esplink netdev interface--> C --lneto TCP/IP + DHCP/DNS/NTP--> D --EthernetDevice send/recv--> E --radio.c / lib.c / isr.c--> F --WiFi + PHY libs--> G
+```
+
+- **User Application** - your code, using Go `net/http` or the `lneto` API directly.
+- **espradio/netlink** - implements the TinyGo `netdev`/`netlink` interface so the Go stdlib `net` package works.
+- **espradio Stack** - wraps the [`lneto`](https://github.com/soypat/lneto) pure-Go TCP/IP stack with DHCP, DNS, and NTP support.
+- **espradio NetDev** - L2 Ethernet device that sends/receives raw frames to and from the radio.
+- **CGo Bridge** - C shim code that translates between Go and the Espressif binary libraries.
+- **Espressif Binary Blobs** - pre-compiled WiFi and PHY libraries provided by Espressif.
+- **ESP32 Radio Hardware** - the on-chip 2.4 GHz radio peripheral.
+
 
 ## Updating `esp-wifi-sys`
 
 This package uses files from the [`esp-wifi-sys`](https://github.com/esp-rs/esp-wifi-sys) package, then copies the needed ones into the `blobs` directory.
 
 To update these dependencies to the latest version, run the `make update` command. This will update the submodule, then copy the needed files. Then run `make patch-esp32s3` to patch the blobs for the LLD linker. Note that this may break existing functionality requiring changes to TinyGo linker files or other changes.
+
+## Debugging
+
+- `netlinkdebug`: enables printing of netlink actions (webserver example)
+- `pcapdebug`: enables logging of all packets sent and received (all examples)
+```sh
+tinygo flash -target=xiao-esp32c3 -tags=netlinkdebug,pcapdebug ./examples/webserver
+```

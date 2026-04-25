@@ -34,7 +34,7 @@ type EthernetDevice interface {
 	// over SPI), reads from the bus and invokes the handler for each
 	// received frame. Behaviour for interrupt driven devices is undefined
 	// at the moment.
-	EthPoll(buf []byte) (bool, error)
+	EthPoll(buf []byte) (int, error)
 
 	// HardwareAddr6 returns the device's 6-byte MAC address.
 	// For PHY-only devices, returns the MAC provided at configuration.

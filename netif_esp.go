@@ -35,6 +35,10 @@ func StartNetDevAP() (*NetDev, error) {
 	return startNetDev(1)
 }
 
+// SendEthFrame sends a raw Ethernet frame out the WiFi interface.  The frame must
+// include the Ethernet header and be at least 60 bytes (including CRC, which is not
+// included in the frame).  SendEthFrame returns an error if the frame is too short
+// or too long, or if the driver is not ready to send.
 func (nd *NetDev) SendEthFrame(frame []byte) error {
 	if len(frame) == 0 {
 		return nil
@@ -46,24 +50,29 @@ func (nd *NetDev) SendEthFrame(frame []byte) error {
 	return nil
 }
 
+// SetEthRecvHandler sets the callback to be called when a new Ethernet frame is received.
 func (nd *NetDev) SetEthRecvHandler(handler func(pkt []byte) error) {
 	nd.rxHandler = handler
 }
 
-func (nd *NetDev) EthPoll(buf []byte) (bool, error) {
+// EthPoll checks for a received Ethernet frame and calls the receive handler if one is available.
+// EthPoll returns (true, nil) if a frame was received and the handler was called, (false, nil)
+// if no frame was available, or (false, err) if an error occurred.
+func (nd *NetDev) EthPoll(buf []byte) (int, error) {
 	if C.espradio_netif_rx_available() == 0 {
-		return false, nil
+		return 0, nil
 	}
 	n := C.espradio_netif_rx_pop(unsafe.Pointer(&buf[0]), C.uint16_t(len(buf)))
 	if n == 0 {
-		return false, nil
+		return 0, nil
 	}
 	if nd.rxHandler != nil {
 		nd.rxHandler(buf[:n])
 	}
-	return true, nil
+	return int(n), nil
 }
 
+// HardwareAddr6 returns the 6-byte MAC address of the WiFi interface.
 func (nd *NetDev) HardwareAddr6() (mac [6]byte, _ error) {
 	code := C.espradio_netif_get_mac((*C.uint8_t)(unsafe.Pointer(&mac[0])))
 	if code != C.ESP_OK {
@@ -72,10 +81,14 @@ func (nd *NetDev) HardwareAddr6() (mac [6]byte, _ error) {
 	return mac, nil
 }
 
+// MaxFrameSize returns the maximum Ethernet frame size supported by the driver,
+// including the Ethernet header but excluding CRC.
 func (nd *NetDev) MaxFrameSize() int {
 	return MaxFrameSize
 }
 
+// NetFlags returns the network interface flags for this device.  The flags indicate
+// that the interface is up and supports broadcast and multicast.
 func (nd *NetDev) NetFlags() net.Flags {
 	return net.FlagUp | net.FlagBroadcast | net.FlagMulticast
 }

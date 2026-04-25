@@ -21,5 +21,15 @@ patch-esp32:
 patch-esp32s3:
 	go run ./tools/patch_xtensa_literals.go blobs/libs/esp32s3/*.a
 
+smoke-test:
+	mkdir -p build
+	rm -rf build/*
+	@for example in ./examples/*/; do \
+		for target in xiao-esp32c3 xiao-esp32s3; do \
+			echo "tinygo build -target=$$target -size short -o build/$$(basename $$example) $$example"; \
+			tinygo build -target=$$target -size short -o build/$$(basename $$example) $$example || exit 1; \
+		done; \
+	done
+
 update-esp-wifi:
 	cd esp-wifi && git pull --rebase origin main

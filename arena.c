@@ -119,9 +119,6 @@ void *espradio_arena_alloc(size_t size) {
         blk = FREE_NEXT(blk);
     }
     ARENA_DBG("arena: alloc %zu FAILED (OOM)\n", size);
-    /* ets_printf goes straight to ROM — no printf→malloc recursion risk. */
-    ets_printf("arena: OOM size=%d need=%d cap=%d\n",
-               (int)size, (int)need, (int)arena_cap);
     return NULL;
 }
 

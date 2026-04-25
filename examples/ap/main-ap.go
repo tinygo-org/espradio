@@ -23,8 +23,7 @@ func main() {
 
 	println("ap: enabling radio...")
 	if err := espradio.Enable(espradio.Config{Logging: espradio.LogLevelError}); err != nil {
-		println("ap: enable err:", err)
-		return
+		failure("ap: enable err: " + err.Error())
 	}
 
 	println("ap: starting AP...")
@@ -35,15 +34,13 @@ func main() {
 		AuthOpen: true,
 	})
 	if err != nil {
-		println("ap: start err:", err)
-		return
+		failure("ap: start err: " + err.Error())
 	}
 
 	println("ap: starting L2 netdev (AP)...")
 	nd, err := espradio.StartNetDevAP()
 	if err != nil {
-		println("ap: netdev err:", err)
-		return
+		failure("ap: netdev err: " + err.Error())
 	}
 
 	const apIP = "192.168.4.1"
@@ -57,8 +54,7 @@ func main() {
 		MaxUDPPorts:   2,
 	})
 	if err != nil {
-		println("ap: stack err:", err)
-		return
+		failure("ap: stack err: " + err.Error())
 	}
 
 	println("ap: configuring DHCP server...")
@@ -68,14 +64,12 @@ func main() {
 		Subnet:     subnet,
 	})
 	if err != nil {
-		println("ap: dhcp server configure err:", err)
-		return
+		failure("ap: dhcp server configure err: " + err.Error())
 	}
 
 	err = stack.LnetoStack().RegisterUDP(&dhcpServer, nil, dhcpv4.DefaultClientPort)
 	if err != nil {
-		println("ap: dhcp server register err:", err)
-		return
+		failure("ap: dhcp server register err: " + err.Error())
 	}
 
 	println("ap: AP is running on", apIP, "- connect to", ssid)
@@ -98,5 +92,12 @@ func stackLoop(stack *espradio.Stack) {
 		}
 		_ = send
 		_ = recv
+	}
+}
+
+func failure(msg string) {
+	for {
+		println("failure:", msg)
+		time.Sleep(1 * time.Second)
 	}
 }

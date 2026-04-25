@@ -7,7 +7,6 @@ package main
 import (
 	_ "embed"
 	"io"
-	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -22,23 +21,6 @@ var indexHTML string
 
 //go:embed sixlines.html
 var sixlinesHTML string
-
-// indexBefore and indexAfter are the two halves of index.html split at the
-// access counter insertion point.  Populated by init().
-var indexBefore, indexAfter string
-
-const accessMarker = "{{ACCESS}}"
-
-func init() {
-	for i := 0; i <= len(indexHTML)-len(accessMarker); i++ {
-		if indexHTML[i:i+len(accessMarker)] == accessMarker {
-			indexBefore = indexHTML[:i]
-			indexAfter = indexHTML[i+len(accessMarker):]
-			return
-		}
-	}
-	indexBefore = indexHTML
-}
 
 var (
 	ssid     string
@@ -59,7 +41,7 @@ func main() {
 		Passphrase: password,
 	})
 	if err != nil {
-		log.Fatal(err)
+		failure("could not connect to WiFi: " + err.Error())
 	}
 
 	http.Handle("/", logRequest(root))
@@ -73,9 +55,8 @@ func main() {
 	host := h.String()
 	println("HTTP server listening on http://" + host + port)
 	err = http.ListenAndServe(host+port, nil)
-	for err != nil {
-		println("error:", err.Error())
-		time.Sleep(5 * time.Second)
+	if err != nil {
+		failure("http.ListenAndServe: " + err.Error())
 	}
 }
 
@@ -87,37 +68,12 @@ func logRequest(h http.HandlerFunc) http.Handler {
 }
 
 func root(w http.ResponseWriter, r *http.Request) {
-	access := 1
-
-	cookie, err := r.Cookie("access")
-	if err != nil {
-		if err == http.ErrNoCookie {
-			cookie = &http.Cookie{
-				Name:  "access",
-				Value: "1",
-			}
-		} else {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-	} else {
-		v, err := strconv.ParseInt(cookie.Value, 10, 0)
-		if err != nil {
-			http.Error(w, "invalid cookie.Value : "+cookie.Value, http.StatusBadRequest)
-			return
-		}
-		cookie.Value = strconv.Itoa(int(v) + 1)
-		access = int(v) + 1
-	}
-	http.SetCookie(w, cookie)
 	w.WriteHeader(http.StatusOK)
-
-	io.WriteString(w, indexBefore)
-	io.WriteString(w, strconv.Itoa(access))
-	io.WriteString(w, indexAfter)
+	io.WriteString(w, indexHTML)
 }
 
 func sixlines(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
 	io.WriteString(w, sixlinesHTML)
 }
 
@@ -154,4 +110,11 @@ func cnt(w http.ResponseWriter, r *http.Request) {
 	io.WriteString(w, `{"cnt": `)
 	io.WriteString(w, strconv.Itoa(counter))
 	io.WriteString(w, `}`)
+}
+
+func failure(msg string) {
+	for {
+		println("failure:", msg)
+		time.Sleep(1 * time.Second)
+	}
 }

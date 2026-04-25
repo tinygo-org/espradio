@@ -4,7 +4,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -34,7 +33,7 @@ func main() {
 		Passphrase: password,
 	})
 	if err != nil {
-		log.Fatal(err)
+		failure("WiFi connect failed: " + err.Error())
 	}
 
 	println("Connected. Getting URL...")
@@ -74,5 +73,12 @@ func main() {
 		cnt++
 		fmt.Printf("-------- %d --------\r\n", cnt)
 		time.Sleep(10 * time.Second)
+	}
+}
+
+func failure(msg string) {
+	for {
+		println("failure:", msg)
+		time.Sleep(1 * time.Second)
 	}
 }
