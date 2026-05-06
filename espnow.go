@@ -73,9 +73,10 @@ type ESPNowSendReport struct {
 }
 
 var (
-	espNowMu          sync.RWMutex
-	espNowRecvHandler func(ESPNowReceive)
-	espNowSendHandler func(ESPNowSendReport)
+	espNowMu            sync.RWMutex
+	espNowRecvHandler   func(ESPNowReceive)
+	espNowSendHandler   func(ESPNowSendReport)
+	activeManagedESPNow *ESPNow
 )
 
 // ESPNowInit initializes the ESP-NOW subsystem and registers callback trampolines.
@@ -239,10 +240,8 @@ func copyMAC(ptr *C.uint8_t) [ESPNowAddressLength]byte {
 func espradio_on_esp_now_recv(srcAddr, destAddr *C.uint8_t, rssi C.int, channel, secondaryChannel C.uint8_t, noiseFloor C.int, timestamp C.uint32_t, data *C.uint8_t, dataLen C.int) {
 	espNowMu.RLock()
 	handler := espNowRecvHandler
+	manager := activeManagedESPNow
 	espNowMu.RUnlock()
-	if handler == nil {
-		return
-	}
 
 	event := ESPNowReceive{
 		SourceAddress:      copyMAC(srcAddr),
@@ -256,24 +255,33 @@ func espradio_on_esp_now_recv(srcAddr, destAddr *C.uint8_t, rssi C.int, channel,
 	if data != nil && dataLen > 0 {
 		event.Data = C.GoBytes(unsafe.Pointer(data), dataLen)
 	}
-	handler(event)
+	if handler != nil {
+		handler(event)
+	}
+	if manager != nil {
+		manager.handleReceive(event)
+	}
 }
 
 //export espradio_on_esp_now_send
 func espradio_on_esp_now_send(destAddr, srcAddr *C.uint8_t, ifidx C.wifi_interface_t, rate C.wifi_phy_rate_t, txStatus C.wifi_tx_status_t, status C.esp_now_send_status_t) {
 	espNowMu.RLock()
 	handler := espNowSendHandler
+	manager := activeManagedESPNow
 	espNowMu.RUnlock()
-	if handler == nil {
-		return
-	}
 
-	handler(ESPNowSendReport{
+	report := ESPNowSendReport{
 		DestinationAddress: copyMAC(destAddr),
 		SourceAddress:      copyMAC(srcAddr),
 		If:                 WiFiInterface(ifidx),
 		Rate:               uint32(rate),
 		TxStatus:           ESPNowSendStatus(txStatus),
 		Status:             ESPNowSendStatus(status),
-	})
+	}
+	if handler != nil {
+		handler(report)
+	}
+	if manager != nil {
+		manager.handleSend(report)
+	}
 }
