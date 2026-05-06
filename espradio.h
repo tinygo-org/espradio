@@ -47,6 +47,8 @@ uint32_t espradio_sniff_count(void);
 esp_err_t espradio_ap_set_config(const char *ssid, int ssid_len,
                                  const char *pwd, int pwd_len,
                                  uint8_t channel, int auth_open);
+esp_err_t espradio_esp_now_register_recv_cb(void);
+esp_err_t espradio_esp_now_register_send_cb(void);
 extern esp_err_t esp_wifi_connect_internal(void);
 
 /* ===== netif (netif.c) ===== */
@@ -77,6 +79,13 @@ extern void espradio_hal_wifi_rtc_disable_iso_go(void);
 extern void espradio_hal_reset_wifi_mac_go(void);
 extern int espradio_hal_read_mac_go(unsigned char *mac, unsigned int iftype);
 extern void espradio_on_wifi_event(int32_t eventID, void *data);
+extern void espradio_on_esp_now_recv(const uint8_t *src_addr, const uint8_t *dest_addr,
+                                     int rssi, uint8_t channel, uint8_t secondary_channel,
+                                     int noise_floor, uint32_t timestamp,
+                                     const uint8_t *data, int data_len);
+extern void espradio_on_esp_now_send(const uint8_t *dest_addr, const uint8_t *src_addr,
+                                     wifi_interface_t ifidx, wifi_phy_rate_t rate,
+                                     wifi_tx_status_t tx_status, esp_now_send_status_t status);
 
 /* ===== chip-specific → linker (implemented in esp32c3/ or esp32s3/ *.c) ===== */
 extern void esp_phy_enable(esp_phy_modem_t modem);

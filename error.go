@@ -21,6 +21,29 @@ func (e Error) Error() string {
 		return "espradio: unknown flash error"
 	case e >= C.ESP_ERR_MESH_BASE:
 		return "espradio: unknown mesh error"
+	case e >= C.ESP_ERR_ESPNOW_BASE:
+		switch e {
+		case C.ESP_ERR_ESPNOW_NOT_INIT:
+			return "espradio: esp-now not initialized"
+		case C.ESP_ERR_ESPNOW_ARG:
+			return "espradio: esp-now invalid argument"
+		case C.ESP_ERR_ESPNOW_NO_MEM:
+			return "espradio: esp-now out of memory"
+		case C.ESP_ERR_ESPNOW_FULL:
+			return "espradio: esp-now peer list full"
+		case C.ESP_ERR_ESPNOW_NOT_FOUND:
+			return "espradio: esp-now peer not found"
+		case C.ESP_ERR_ESPNOW_INTERNAL:
+			return "espradio: esp-now internal error"
+		case C.ESP_ERR_ESPNOW_EXIST:
+			return "espradio: esp-now peer already exists"
+		case C.ESP_ERR_ESPNOW_IF:
+			return "espradio: esp-now interface mismatch"
+		case C.ESP_ERR_ESPNOW_CHAN:
+			return "espradio: esp-now channel mismatch"
+		default:
+			return "espradio: esp-now error " + strconv.FormatInt(int64(int32(e)), 10)
+		}
 	case e >= C.ESP_ERR_WIFI_BASE:
 		code := int32(e)
 		switch code {
