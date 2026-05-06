@@ -179,7 +179,7 @@ func ESPNowGetPeer(addr [ESPNowAddressLength]byte) (ESPNowPeer, error) {
 // ESPNowFetchPeer fetches the next peer from the peer table.
 func ESPNowFetchPeer(fromHead bool) (ESPNowPeer, error) {
 	var cpeer C.esp_now_peer_info_t
-	if code := C.esp_now_fetch_peer(C.bool(fromHead), &cpeer); code != C.ESP_OK {
+	if code := C.espradio_esp_now_fetch_peer(C.int(boolToInt(fromHead)), &cpeer); code != C.ESP_OK {
 		return ESPNowPeer{}, makeError(code)
 	}
 	return goESPNowPeer(cpeer), nil
@@ -208,7 +208,7 @@ func cESPNowPeer(peer ESPNowPeer) C.esp_now_peer_info_t {
 	copy(cArrayToBytes((*C.uint8_t)(unsafe.Pointer(&cpeer.lmk[0])), ESPNowKeyLength), peer.Key[:])
 	cpeer.channel = C.uint8_t(peer.Channel)
 	cpeer.ifidx = C.wifi_interface_t(peer.If)
-	cpeer.encrypt = C.bool(peer.Encrypt)
+	C.espradio_esp_now_peer_set_encrypt(&cpeer, C.int(boolToInt(peer.Encrypt)))
 	cpeer.priv = nil
 	return cpeer
 }

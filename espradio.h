@@ -49,6 +49,8 @@ esp_err_t espradio_ap_set_config(const char *ssid, int ssid_len,
                                  uint8_t channel, int auth_open);
 esp_err_t espradio_esp_now_register_recv_cb(void);
 esp_err_t espradio_esp_now_register_send_cb(void);
+esp_err_t espradio_esp_now_fetch_peer(int from_head, esp_now_peer_info_t *peer);
+void espradio_esp_now_peer_set_encrypt(esp_now_peer_info_t *peer, int encrypt);
 extern esp_err_t esp_wifi_connect_internal(void);
 
 /* ===== netif (netif.c) ===== */

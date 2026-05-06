@@ -1,8 +1,10 @@
+CGO_CFLAGS_ALLOW_PATTERN = -fno-short-enums
+
 fmt-check:
 	test -z "$(shell gofmt -l .)"
 
 unit-test:
-	tinygo test -target=esp32c3-qemu.json ./...
+	CGO_CFLAGS_ALLOW='$(CGO_CFLAGS_ALLOW_PATTERN)' tinygo test -target=esp32c3-qemu.json ./...
 
 update: update-esp-wifi
 	rm -rf blobs/headers
@@ -22,8 +24,8 @@ smoke-test:
 	rm -rf build/*
 	@for example in ./examples/*/; do \
 		for target in xiao-esp32c3 xiao-esp32s3; do \
-			echo "tinygo build -target=$$target -size short -o build/$$(basename $$example) $$example"; \
-			tinygo build -target=$$target -size short -o build/$$(basename $$example) $$example || exit 1; \
+			echo "CGO_CFLAGS_ALLOW='$(CGO_CFLAGS_ALLOW_PATTERN)' tinygo build -target=$$target -size short -o build/$$(basename $$example) $$example"; \
+			CGO_CFLAGS_ALLOW='$(CGO_CFLAGS_ALLOW_PATTERN)' tinygo build -target=$$target -size short -o build/$$(basename $$example) $$example || exit 1; \
 		done; \
 	done
 

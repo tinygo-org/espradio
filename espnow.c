@@ -49,3 +49,13 @@ esp_err_t espradio_esp_now_register_recv_cb(void) {
 esp_err_t espradio_esp_now_register_send_cb(void) {
     return esp_now_register_send_cb(espradio_esp_now_send_cb);
 }
+
+esp_err_t espradio_esp_now_fetch_peer(int from_head, esp_now_peer_info_t *peer) {
+    return esp_now_fetch_peer(from_head != 0, peer);
+}
+
+void espradio_esp_now_peer_set_encrypt(esp_now_peer_info_t *peer, int encrypt) {
+    if (peer != NULL) {
+        peer->encrypt = encrypt != 0;
+    }
+}
