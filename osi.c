@@ -122,6 +122,8 @@ int32_t espradio_semphr_give(void *semphr);
 void *espradio_wifi_thread_semphr_get(void);
 
 void *espradio_recursive_mutex_create(void);
+void *espradio_arena_alloc(size_t size);
+void espradio_arena_free(void *p);
 
 static void *espradio_mutex_create(void) {
 #if ESPRADIO_OSI_DEBUG
@@ -140,8 +142,79 @@ int32_t espradio_mutex_lock(void *mutex);
 
 int32_t espradio_mutex_unlock(void *mutex);
 
-void *espradio_generic_queue_create(uint32_t queue_len, uint32_t item_size);
-void  espradio_generic_queue_delete(void *queue);
+#define ESPRADIO_QUEUE_MAX 8
+
+typedef struct espradio_queue {
+    void *handle;
+    uint8_t *storage;
+    uint32_t len;
+    uint32_t item_size;
+    uint32_t read;
+    uint32_t write;
+    uint32_t count;
+    int used;
+    int lock;
+} espradio_queue_t;
+
+static espradio_queue_t s_queues[ESPRADIO_QUEUE_MAX];
+
+static void queue_lock(espradio_queue_t *q) {
+    while (__sync_lock_test_and_set(&q->lock, 1)) {
+    }
+}
+
+static void queue_unlock(espradio_queue_t *q) {
+    __sync_lock_release(&q->lock);
+}
+
+static espradio_queue_t *queue_resolve(void *ptr) {
+    if (!ptr) return NULL;
+    for (unsigned i = 0; i < ESPRADIO_QUEUE_MAX; i++) {
+        espradio_queue_t *q = &s_queues[i];
+        if (!q->used) continue;
+        if (ptr == q || ptr == &q->handle) return q;
+        if (*(void **)ptr == q) return q;
+    }
+    return NULL;
+}
+
+void *espradio_generic_queue_create(uint32_t queue_len, uint32_t item_size) {
+    if (queue_len < 1) queue_len = 1;
+    if (item_size < 1) item_size = 1;
+    for (unsigned i = 0; i < ESPRADIO_QUEUE_MAX; i++) {
+        espradio_queue_t *q = &s_queues[i];
+        if (q->used) continue;
+        size_t bytes = (size_t)queue_len * (size_t)item_size;
+        q->storage = (uint8_t *)espradio_arena_alloc(bytes);
+        if (!q->storage) return NULL;
+        q->len = queue_len;
+        q->item_size = item_size;
+        q->read = 0;
+        q->write = 0;
+        q->count = 0;
+        q->lock = 0;
+        q->used = 1;
+        q->handle = q;
+        return &q->handle;
+    }
+    return NULL;
+}
+
+void espradio_generic_queue_delete(void *queue) {
+    espradio_queue_t *q = queue_resolve(queue);
+    if (!q) return;
+    queue_lock(q);
+    espradio_arena_free(q->storage);
+    q->storage = NULL;
+    q->len = 0;
+    q->item_size = 0;
+    q->read = 0;
+    q->write = 0;
+    q->count = 0;
+    q->used = 0;
+    q->handle = NULL;
+    queue_unlock(q);
+}
 
 static void *espradio_queue_create(uint32_t queue_len, uint32_t item_size) {
 #if ESPRADIO_OSI_DEBUG
@@ -157,7 +230,22 @@ static void espradio_queue_delete(void *queue) {
     espradio_generic_queue_delete(queue);
 }
 
-int32_t espradio_queue_send(void *queue, void *item, uint32_t block_time_tick);
+int32_t espradio_queue_send(void *queue, void *item, uint32_t block_time_tick) {
+    (void)block_time_tick;
+    espradio_queue_t *q = queue_resolve(queue);
+    if (!q || !item) return 0;
+    queue_lock(q);
+    if (q->count == q->len) {
+        queue_unlock(q);
+        return 0;
+    }
+    memcpy(q->storage + ((size_t)q->write * q->item_size), item, q->item_size);
+    q->write++;
+    if (q->write == q->len) q->write = 0;
+    q->count++;
+    queue_unlock(q);
+    return 1;
+}
 
 static int32_t espradio_queue_send_to_back(void *queue, void *item, uint32_t block_time_tick) {
 #if ESPRADIO_OSI_DEBUG
@@ -173,13 +261,59 @@ static int32_t espradio_queue_send_to_front(void *queue, void *item, uint32_t bl
     return espradio_queue_send(queue, item, block_time_tick);
 }
 
-int32_t espradio_queue_recv(void *queue, void *item, uint32_t block_time_tick);
+int32_t espradio_queue_recv(void *queue, void *item, uint32_t block_time_tick) {
+    espradio_queue_t *q = queue_resolve(queue);
+    if (!q || !item) return 0;
+
+    uint64_t deadline = 0;
+    int forever = block_time_tick == OSI_FUNCS_TIME_BLOCKING;
+    if (!forever && block_time_tick != 0) {
+        deadline = espradio_time_us_now() + ((uint64_t)block_time_tick * 1000ULL);
+    }
+
+    for (;;) {
+        queue_lock(q);
+        if (q->count != 0) {
+            memcpy(item, q->storage + ((size_t)q->read * q->item_size), q->item_size);
+            q->read++;
+            if (q->read == q->len) q->read = 0;
+            q->count--;
+            queue_unlock(q);
+            return 1;
+        }
+        queue_unlock(q);
+
+        if (block_time_tick == 0) return 0;
+        if (!forever && espradio_time_us_now() >= deadline) return 0;
+        uint64_t target = espradio_time_us_now() + 1000ULL;
+        espradio_task_yield_go();
+        while (espradio_time_us_now() < target) {
+        }
+    }
+}
 
 static uint32_t espradio_queue_msg_waiting(void *queue) {
 #if ESPRADIO_OSI_DEBUG
     printf("osi: queue_msg_waiting q=%p\n", (void *)queue);
 #endif
-    return espradio_queue_len(queue);
+    espradio_queue_t *q = queue_resolve(queue);
+    if (!q) return 0;
+    queue_lock(q);
+    uint32_t count = q->count;
+    queue_unlock(q);
+    return count;
+}
+
+uint32_t espradio_queue_len(void *queue) {
+    return espradio_queue_msg_waiting(queue);
+}
+
+void *espradio_wifi_create_queue(int queue_len, int item_size) {
+    return espradio_generic_queue_create((uint32_t)queue_len, (uint32_t)item_size);
+}
+
+void espradio_wifi_delete_queue(void *queue) {
+    espradio_generic_queue_delete(queue);
 }
 
 /* Event group functions — implemented in Go (radio.go), declared here
