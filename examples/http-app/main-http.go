@@ -22,14 +22,15 @@ import (
 
 	"github.com/soypat/lneto"
 	"github.com/soypat/lneto/http/httpraw"
+	"github.com/soypat/lneto/ipv4"
 	"github.com/soypat/lneto/tcp"
 	"github.com/soypat/lneto/x/xnet"
 	"tinygo.org/x/espradio"
 )
 
 var (
-	ssid     string
-	password string
+	ssid     string = "Patoniato"
+	password string = "amoladoramesada"
 )
 
 const (
@@ -98,7 +99,7 @@ func main() {
 	if err != nil {
 		failure("DHCP failed: " + err.Error())
 	}
-	println("got IP:", dhcp.AssignedAddr.String())
+	println("got IP:", string(ipv4.AppendFormatAddr(nil, dhcp.AssignedAddr4)))
 
 	lstack := espstack.LnetoStack()
 	rstack := lstack.StackRetrying(lneto.BackoffStrategy(func(_ uint) time.Duration {
@@ -108,7 +109,7 @@ func main() {
 	if err != nil {
 		failure("ARP resolve failed: " + err.Error())
 	}
-	lstack.SetGateway6(gatewayHW)
+	lstack.SetGatewayHardwareAddr(gatewayHW)
 
 	// DNS lookup for NTP server and calculate time. If this fails just ignore.
 	println("resolving ntp host:", ntpHost)
@@ -138,13 +139,13 @@ func main() {
 		failure("tcppool create: " + err.Error())
 	}
 
-	listenAddr := netip.AddrPortFrom(dhcp.AssignedAddr, listenPort)
+	listenAddr := netip.AddrPortFrom(netip.AddrFrom4(dhcp.AssignedAddr4), listenPort)
 	var listener tcp.Listener
 	err = listener.Reset(listenPort, tcpPool)
 	if err != nil {
 		failure("listener reset: " + err.Error())
 	}
-	err = lstack.RegisterListener(&listener)
+	err = lstack.RegisterListenerTCP(&listener)
 	if err != nil {
 		failure("listener register: " + err.Error())
 	}

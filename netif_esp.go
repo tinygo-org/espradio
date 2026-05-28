@@ -1,14 +1,9 @@
 package espradio
 
-/*
-#cgo CFLAGS: -fno-short-enums
-#include "espradio.h"
-*/
-import "C"
-
 import (
 	"net"
-	"unsafe"
+
+	"tinygo.org/x/espradio/cesp"
 )
 
 var _ EthernetDevice = (*NetDev)(nil)
@@ -19,8 +14,8 @@ type NetDev struct {
 }
 
 func startNetDev(apMode int) (*NetDev, error) {
-	if code := C.espradio_netif_start_rx(C.int(apMode)); code != C.ESP_OK {
-		return nil, makeError(code)
+	if err := cesp.NetifStartRx(apMode); err != nil {
+		return nil, err
 	}
 	return &NetDev{}, nil
 }
@@ -43,11 +38,7 @@ func (nd *NetDev) SendEthFrame(frame []byte) error {
 	if len(frame) == 0 {
 		return nil
 	}
-	code := C.espradio_netif_tx(unsafe.Pointer(&frame[0]), C.uint16_t(len(frame)))
-	if code != 0 {
-		return makeError(C.esp_err_t(code))
-	}
-	return nil
+	return cesp.NetifTx(frame)
 }
 
 // SetEthRecvHandler sets the callback to be called when a new Ethernet frame is received.
@@ -59,26 +50,22 @@ func (nd *NetDev) SetEthRecvHandler(handler func(pkt []byte) error) {
 // EthPoll returns (true, nil) if a frame was received and the handler was called, (false, nil)
 // if no frame was available, or (false, err) if an error occurred.
 func (nd *NetDev) EthPoll(buf []byte) (int, error) {
-	if C.espradio_netif_rx_available() == 0 {
+	if !cesp.NetifRxAvailable() {
 		return 0, nil
 	}
-	n := C.espradio_netif_rx_pop(unsafe.Pointer(&buf[0]), C.uint16_t(len(buf)))
+	n := cesp.NetifRxPop(buf)
 	if n == 0 {
 		return 0, nil
 	}
 	if nd.rxHandler != nil {
 		nd.rxHandler(buf[:n])
 	}
-	return int(n), nil
+	return n, nil
 }
 
 // HardwareAddr6 returns the 6-byte MAC address of the WiFi interface.
 func (nd *NetDev) HardwareAddr6() (mac [6]byte, _ error) {
-	code := C.espradio_netif_get_mac((*C.uint8_t)(unsafe.Pointer(&mac[0])))
-	if code != C.ESP_OK {
-		return mac, makeError(code)
-	}
-	return mac, nil
+	return cesp.NetifGetMAC()
 }
 
 // MaxFrameSize returns the maximum Ethernet frame size supported by the driver,
@@ -95,5 +82,5 @@ func (nd *NetDev) NetFlags() net.Flags {
 
 // NetifRxStats returns (callback_count, drop_count) from the C ring buffer.
 func NetifRxStats() (uint32, uint32) {
-	return uint32(C.espradio_netif_rx_cb_count()), uint32(C.espradio_netif_rx_cb_drop())
+	return cesp.NetifRxStats()
 }

@@ -47,8 +47,16 @@ func NewStack(dev *NetDev, cfg StackConfig) (*Stack, error) {
 
 	stack := &Stack{dev: dev}
 	const MTU = MaxFrameSize - ethernet.MaxOverheadSize + 4 // CRC not included:+4
+	var static4 [4]byte
+	var static6 [16]byte
+	if cfg.StaticAddress.Is4() {
+		static4 = cfg.StaticAddress.As4()
+	} else if cfg.StaticAddress.Is6() {
+		static6 = cfg.StaticAddress.As16()
+	}
 	err = stack.s.Reset(xnet.StackConfig{
-		StaticAddress:     cfg.StaticAddress,
+		StaticAddress4:    static4,
+		StaticAddress6:    static6,
 		DNSServer:         cfg.DNSServer,
 		NTPServer:         cfg.NTPServer,
 		Hostname:          cfg.Hostname,
@@ -131,6 +139,6 @@ func (stack *Stack) SetupWithDHCP(cfg DHCPConfig) (*xnet.DHCPResults, error) {
 	if err != nil {
 		return dhcpResults, err
 	}
-	lstack.SetGateway6(gatewayHW)
+	lstack.SetGatewayHardwareAddr(gatewayHW)
 	return dhcpResults, nil
 }

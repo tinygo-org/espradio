@@ -3,12 +3,13 @@
 package espradio
 
 /*
-#cgo CFLAGS: -Iblobs/include
-#cgo CFLAGS: -Iblobs/include/local
-#cgo CFLAGS: -Iblobs/headers
+#cgo CFLAGS: -Icesp/blobs/include
+#cgo CFLAGS: -Icesp/blobs/include/local
+#cgo CFLAGS: -Icesp/blobs/headers
 #cgo CFLAGS: -DCONFIG_SOC_WIFI_NAN_SUPPORT=0
 #cgo CFLAGS: -DESPRADIO_PHY_PATCH_ROMFUNCS=0
 #cgo CFLAGS: -fno-short-enums
+#cgo CFLAGS: -Icesp
 
 #include "espradio.h"
 */
@@ -21,6 +22,8 @@ import (
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"tinygo.org/x/espradio/cesp"
 )
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -122,7 +125,7 @@ func schedOnce() {
 	// the hardware ISR preempts us and re-entrantly calls the blob's ISR
 	// handler, corrupting its state and crashing.  Masking first prevents
 	// this; espradio_wifi_unmask() at the end re-enables the interrupt.
-	C.espradio_ints_off(C.uint32_t(1 << wifiCPUInterrupt))
+	cesp.IntsOff(1 << cesp.WifiCPUInterrupt)
 
 	// Restore ROM pointers BEFORE any blob code runs.  The blob reads
 	// pTxRx, pp_wdev_funcs etc. during ISR/queue/timer processing below.
@@ -170,6 +173,11 @@ func kickSched() {
 	}
 }
 
+func wifiISRHandler(intr interrupt.Interrupt) {
+	cesp.WifiISRHandler(intr)
+	kickSched()
+}
+
 // arenaPool keeps the arena backing memory reachable from Go so the GC
 // won't collect it.  The WiFi blob stores pointers into this pool in ROM
 // BSS (outside the GC's scan range), so individual malloc'd objects would
@@ -186,7 +194,7 @@ func ArenaStats() (used, capacity uint32) {
 // Enable and configure the radio for WiFi.
 func Enable(config Config) error {
 	// Allocate arena pool from Go heap and hand it to C.
-	poolSize := arenaPoolSize
+	poolSize := cesp.ArenaPoolSize
 	if config.ArenaPoolSize > 0 {
 		poolSize = config.ArenaPoolSize
 	}
@@ -195,10 +203,10 @@ func Enable(config Config) error {
 
 	startSchedTicker()
 	time.Sleep(schedTickerMs * time.Millisecond)
-	initHardware()
+	cesp.InitHardware()
 	C.espradio_ensure_osi_ptr()
 
-	wifiISR = interrupt.New(wifiCPUInterrupt, wifiISRHandler)
+	wifiISR = interrupt.New(cesp.WifiCPUInterrupt, wifiISRHandler)
 	wifiISR.Enable()
 	C.espradio_wifi_int_raise_priority()
 
@@ -453,11 +461,11 @@ func SniffCountOnChannel(channel uint8, duration time.Duration) (uint32, error) 
 // ─── Tasks / timers / ISR ────────────────────────────────────────────────────
 
 func millisecondsToTicks(ms uint32) uint32 {
-	return ms * (ticksPerSecond / 1000)
+	return ms * (cesp.TicksPerSecond / 1000)
 }
 
 func ticksToMilliseconds(ticks uint32) uint32 {
-	return ticks / (ticksPerSecond / 1000)
+	return ticks / (cesp.TicksPerSecond / 1000)
 }
 
 //export espradio_panic
@@ -612,7 +620,7 @@ func espradio_timer_arm_go_us(timer unsafe.Pointer, us uint32, repeat int32) {
 
 //export espradio_task_delay
 func espradio_task_delay(ticks uint32) {
-	const ticksPerMillisecond = ticksPerSecond / 1000
+	const ticksPerMillisecond = cesp.TicksPerSecond / 1000
 	ms := (ticks + ticksPerMillisecond - 1) / ticksPerMillisecond
 	time.Sleep(time.Duration(ms) * time.Millisecond)
 }
