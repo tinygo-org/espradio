@@ -21,7 +21,7 @@ func (e Error) Error() string {
 		return "espradio: unknown flash error"
 	case e >= C.ESP_ERR_MESH_BASE:
 		return "espradio: unknown mesh error"
-	case e >= C.ESP_ERR_ESPNOW_BASE:
+	case e >= C.ESP_ERR_ESPNOW_BASE && e <= C.ESP_ERR_ESPNOW_CHAN:
 		switch e {
 		case C.ESP_ERR_ESPNOW_NOT_INIT:
 			return "espradio: esp-now not initialized"
