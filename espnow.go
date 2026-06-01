@@ -242,6 +242,9 @@ func espradio_on_esp_now_recv(srcAddr, destAddr *C.uint8_t, rssi C.int, channel,
 	handler := espNowRecvHandler
 	manager := activeManagedESPNow
 	espNowMu.RUnlock()
+	if handler == nil && manager == nil {
+		return
+	}
 
 	event := ESPNowReceive{
 		SourceAddress:      copyMAC(srcAddr),
@@ -269,6 +272,9 @@ func espradio_on_esp_now_send(destAddr, srcAddr *C.uint8_t, ifidx C.wifi_interfa
 	handler := espNowSendHandler
 	manager := activeManagedESPNow
 	espNowMu.RUnlock()
+	if handler == nil && manager == nil {
+		return
+	}
 
 	report := ESPNowSendReport{
 		DestinationAddress: copyMAC(destAddr),
