@@ -63,8 +63,8 @@ func initHardware() error {
 // https://github.com/esp-rs/esp-wifi/blob/v0.2.0/esp-wifi/src/timer/riscv.rs#L28
 const ticksPerSecond = 16_000_000
 
-// C3 has only 321KB DRAM total; keep the arena pool small.
-const arenaPoolSize = 32 * 1024
+// C3 has only 321KB DRAM total, however 48KB is required for the arena pool for netlink.
+const arenaPoolSize = 48 * 1024
 
 // ESP32-C3 (RISC-V): call the blob's WiFi ISR directly from the
 // hardware interrupt handler.  On RISC-V the interrupt context can

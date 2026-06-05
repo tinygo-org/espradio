@@ -3,6 +3,7 @@
 package main
 
 import (
+	"net/netip"
 	"time"
 
 	"tinygo.org/x/espradio"
@@ -65,7 +66,13 @@ func main() {
 	if err != nil {
 		failure("DHCP failed: " + err.Error())
 	}
-	println("got IP:", dhcp.AssignedAddr.String())
+
+	addr, ok := netip.AddrFromSlice(dhcp.AssignedAddr4[:])
+	if !ok {
+		failure("invalid IP address")
+	}
+
+	println("got IP:", addr.String())
 	println("gateway:", dhcp.Router.String())
 	if len(dhcp.DNSServers) > 0 {
 		println("DNS:", dhcp.DNSServers[0].String())

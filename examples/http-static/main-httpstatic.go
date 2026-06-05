@@ -88,7 +88,7 @@ func main() {
 	// VERY IMPORTANT TO START BEFORE USING STACK!
 	go loopForeverStack(espstack)
 
-	dhcpResults, err := espstack.SetupWithDHCP(espradio.DHCPConfig{})
+	dhcp, err := espstack.SetupWithDHCP(espradio.DHCPConfig{})
 	if err != nil {
 		failure("DHCP failed: " + err.Error())
 	}
@@ -111,7 +111,13 @@ func main() {
 	}
 
 	lstack := espstack.LnetoStack()
-	listenAddr := netip.AddrPortFrom(dhcpResults.AssignedAddr, listenPort)
+	addr, ok := netip.AddrFromSlice(dhcp.AssignedAddr4[:])
+	if !ok {
+		failure("invalid IP address")
+	}
+
+	println("got IP:", addr.String())
+	listenAddr := netip.AddrPortFrom(addr, listenPort)
 
 	// Create and register TCP listener.
 	var listener tcp.Listener
@@ -119,7 +125,7 @@ func main() {
 	if err != nil {
 		failure("listener reset: " + err.Error())
 	}
-	err = lstack.RegisterListener(&listener)
+	err = lstack.RegisterListenerTCP(&listener)
 	if err != nil {
 		failure("listener register: " + err.Error())
 	}

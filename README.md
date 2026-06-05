@@ -305,7 +305,7 @@ listening on http://192.168.1.46:80
 Minimal HTTP server that serves a static webpage using the low-level lneto interface.
 
 ```
-$ tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=yourssid -X main.password=YourPasswordHere" -monitor 8kb ./examples/http-static/
+$ tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=yourssid -X main.password=YourPasswordHere" -monitor ./examples/http-static/
 Connected to ESP32-C3
 Flashing: 627504/627504 bytes (100%)
 Connected to /dev/ttyACM0. Press Ctrl-C to exit.

@@ -7,7 +7,8 @@ import (
 	"net/netip"
 	"time"
 
-	"github.com/soypat/lneto/dhcpv4"
+	"github.com/soypat/lneto/dhcp/dhcpv4"
+	"github.com/soypat/lneto/ipv4"
 	"tinygo.org/x/espradio"
 )
 
@@ -61,13 +62,13 @@ func main() {
 	err = dhcpServer.Configure(dhcpv4.ServerConfig{
 		ServerAddr: addr.As4(),
 		Gateway:    addr.As4(),
-		Subnet:     subnet,
+		Subnet:     ipv4.PrefixFromNetip(subnet),
 	})
 	if err != nil {
 		failure("ap: dhcp server configure err: " + err.Error())
 	}
 
-	err = stack.LnetoStack().RegisterUDP(&dhcpServer, nil, dhcpv4.DefaultClientPort)
+	err = stack.LnetoStack().RegisterUDP4(&dhcpServer, addr.As4(), dhcpv4.DefaultClientPort)
 	if err != nil {
 		failure("ap: dhcp server register err: " + err.Error())
 	}

@@ -1,7 +1,6 @@
 package netlink
 
 import (
-	"errors"
 	"net"
 	"net/netip"
 	"sync"
@@ -98,7 +97,7 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 		Hostname:     params.Ssid,
 		MaxUDPPorts:  2,
 		MaxTCPPorts:  1,
-		PassivePeers: 3,
+		PassivePeers: 255,
 	})
 	if err != nil {
 		if debug {
@@ -168,7 +167,7 @@ func (n *Esplink) GetHardwareAddr() (net.HardwareAddr, error) {
 	if debug {
 		println("GetHardwareAddr")
 	}
-	hw := n.netstack.LnetoStack().HardwareAddress()
+	hw := n.netstack.LnetoStack().HardwareAddr()
 	return hw[:], nil
 }
 
@@ -182,7 +181,7 @@ func (n *Esplink) GetHostByName(name string) (netip.Addr, error) {
 		if debug {
 			println("GetHostByName: empty name")
 		}
-		return netip.Addr{}, errors.New("empty name")
+		return netip.Addr{}, errEmptyHostname
 	} else if name[0] >= '0' && name[0] <= '9' {
 		// Special case to try for IPv4 addresses.
 		addr, err := netip.ParseAddr(name)
@@ -209,7 +208,12 @@ func (n *Esplink) Addr() (netip.Addr, error) {
 	if debug {
 		println("Addr")
 	}
-	return n.netstack.LnetoStack().Addr(), nil
+	addr4 := n.netstack.LnetoStack().Addr4()
+	addr, ok := netip.AddrFromSlice(addr4[:])
+	if !ok {
+		return netip.Addr{}, errInvalidIPAddress
+	}
+	return addr, nil
 }
 
 // Berkely Sockets-like interface, Go-ified.  See man page for socket(2), etc.
