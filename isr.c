@@ -79,6 +79,15 @@ void espradio_user_exception(uint32_t cause, uint32_t epc, uint32_t excvaddr, ui
 static void (*s_isr_fn[32])(void *);
 static void *s_isr_arg[32];
 
+/* Bitmask of ISR slots registered via espradio_set_intr (WiFi sources only). */
+static uint32_t s_wifi_isr_slots;
+
+void espradio_mark_wifi_isr_slot(int32_t n) {
+    if (n >= 0 && n < 32) {
+        s_wifi_isr_slots |= (1u << n);
+    }
+}
+
 void espradio_set_isr(int32_t n, void *f, void *arg) {
     if (n >= 0 && n < 32) {
         s_isr_fn[n] = (void (*)(void *))f;
@@ -98,8 +107,14 @@ void espradio_call_wifi_isr(void) {
     s_wifi_isr_count++;
     s_in_isr = 1;
     ESPRADIO_MEMORY_BARRIER();
-    // CALL ALL ISRs from 0 to 31 just in case, to see if they are set!
-    for (int i = 0; i < 32; i++) {
+    /* Only call ISR slots that were registered via espradio_set_intr for a
+     * WiFi peripheral source.  Calling all 32 slots risks invoking blob
+     * handlers at slot numbers that coincide with TinyGo's GPIO or timer
+     * CPU interrupts, which can corrupt INTENABLE. */
+    uint32_t slots = s_wifi_isr_slots;
+    while (slots) {
+        int i = __builtin_ctz(slots);
+        slots &= slots - 1;
         if (s_isr_fn[i]) {
             s_isr_fn[i](s_isr_arg[i]);
         }

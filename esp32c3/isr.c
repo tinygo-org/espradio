@@ -31,16 +31,19 @@ void espradio_prewire_wifi_interrupts(void) {
     intr_matrix_set(0, ETS_WIFI_PWR_INTR_SOURCE, ESPRADIO_WIFI_CPU_INT);
 }
 
+extern void espradio_mark_wifi_isr_slot(int32_t n);
+
 /* No-op: the blob calls set_intr to route peripheral sources to CPU
  * interrupts, but on RISC-V (ESP32-C3) the routing is already configured
  * by espradio_prewire_wifi_interrupts(). Letting the blob call
  * intr_matrix_set at arbitrary times interferes with TinyGo's interrupt
- * controller state.  The Rust esp-wifi does the same (no-op set_intr). */
+ * controller state.  The Rust esp-wifi does the same (no-op set_intr).
+ * Record the blob's requested intr_num as a WiFi ISR slot. */
 void espradio_set_intr(int32_t cpu_no, uint32_t intr_source, uint32_t intr_num, int32_t intr_prio) {
     (void)cpu_no;
     (void)intr_source;
-    (void)intr_num;
     (void)intr_prio;
+    espradio_mark_wifi_isr_slot((int32_t)intr_num);
 }
 
 /* No-op: the Rust esp-wifi also no-ops clear_intr. */

@@ -27,11 +27,14 @@ void espradio_prewire_wifi_interrupts(void) {
     intr_matrix_set(0, ETS_WIFI_BB_INTR_SOURCE,  ESPRADIO_WIFI_CPU_INT);     /* src 3 */
 }
 
-/* No-op: the blob calls set_intr to route peripheral sources to CPU
- * interrupts, but routing is already configured by
- * espradio_prewire_wifi_interrupts(). */
+extern void espradio_mark_wifi_isr_slot(int32_t n);
+
+/* Route the blob's requested peripheral source to our fixed WiFi CPU interrupt
+ * and record the blob's requested intr_num as a WiFi ISR slot so that
+ * espradio_call_wifi_isr() only calls the relevant handlers. */
 void espradio_set_intr(int32_t cpu_no, uint32_t intr_source, uint32_t intr_num, int32_t intr_prio) {
     intr_matrix_set(0, intr_source, ESPRADIO_WIFI_CPU_INT);
+    espradio_mark_wifi_isr_slot((int32_t)intr_num);
 }
 
 /* No-op: same as set_intr. */
@@ -40,22 +43,33 @@ void espradio_clear_intr(uint32_t intr_source, uint32_t intr_num) {
     (void)intr_num;
 }
 
-/* Enable CPU interrupts using Xtensa INTENABLE special register.
- * The blob calls ints_on with its own mask (1<<0 for WiFi MAC).
- * We translate: if the blob's mask includes a WiFi-related bit,
- * also set our actual WiFi CPU interrupt bit. */
+/* Enable/disable CPU interrupts using Xtensa INTENABLE special register.
+ *
+ * IMPORTANT: We deliberately ignore the blob's mask and only operate on
+ * ESPRADIO_WIFI_CPU_INT (bit 12).  The blob passes its own original CPU
+ * interrupt number (e.g. 0 or 1), which may coincide with CPU interrupts
+ * that TinyGo has allocated for other purposes (bit 10 = GPIO, bit 9 =
+ * timer alarm).  If we forwarded the blob's mask, espradio_ints_off would
+ * clear those bits from INTENABLE, permanently disabling user interrupts
+ * such as GPIO PinFalling callbacks (issue #40).
+ *
+ * The blob calls these for its own critical-section protection.  Since all
+ * blob ISR handlers run in goroutine context (never from real ISR context),
+ * the blob's critical sections are already serialised by TinyGo's
+ * cooperative scheduler; ignoring the mask is safe. */
 void espradio_ints_on(uint32_t mask) {
-    uint32_t actual_mask = mask | (1u << ESPRADIO_WIFI_CPU_INT);
+    (void)mask;
     uint32_t val;
     __asm__ volatile ("rsr %0, intenable" : "=r"(val));
-    val |= actual_mask;
+    val |= (1u << ESPRADIO_WIFI_CPU_INT);
     __asm__ volatile ("wsr %0, intenable; rsync" :: "r"(val));
 }
 
 void espradio_ints_off(uint32_t mask) {
+    (void)mask;
     uint32_t val;
     __asm__ volatile ("rsr %0, intenable" : "=r"(val));
-    val &= ~mask;
+    val &= ~(1u << ESPRADIO_WIFI_CPU_INT);
     __asm__ volatile ("wsr %0, intenable; rsync" :: "r"(val));
 }
 

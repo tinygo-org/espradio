@@ -20,6 +20,7 @@ void espradio_ensure_osi_ptr(void);
 void espradio_coex_adapter_init(void);
 void espradio_call_saved_isr(int32_t n);
 void espradio_call_wifi_isr(void);
+void espradio_mark_wifi_isr_slot(int32_t n);
 uint32_t espradio_get_wifi_isr_count(void);
 void espradio_prewire_wifi_interrupts(void);
 void espradio_wifi_int_to_level(void);
