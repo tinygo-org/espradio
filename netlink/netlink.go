@@ -13,6 +13,8 @@ import (
 	"tinygo.org/x/espradio"
 )
 
+const defaultHostname = "tinygo-espradio"
+
 const pollTime = 5 * time.Millisecond
 
 var pollBackoff = lneto.BackoffStrategy(func(_ uint) time.Duration {
@@ -93,8 +95,11 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 		return err
 	}
 
+	if len(params.Hostname) == 0 {
+		params.Hostname = defaultHostname
+	}
 	espstack, err := espradio.NewStack(nd, espradio.StackConfig{
-		Hostname:     params.Ssid,
+		Hostname:     params.Hostname,
 		MaxUDPPorts:  2,
 		MaxTCPPorts:  1,
 		PassivePeers: 255,
