@@ -399,11 +399,12 @@ esp_err_t espradio_set_country_eu_manual(void) {
 
 esp_err_t espradio_sta_set_config(const char *ssid, int ssid_len,
                                   const char *pwd, int pwd_len) {
+    if (ssid_len < 0 || pwd_len < 0 || ssid_len > 32 || pwd_len > 64) {
+        return ESP_ERR_INVALID_ARG;
+    }
     wifi_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
-    if (ssid_len > 32) ssid_len = 32;
     memcpy(cfg.sta.ssid, ssid, ssid_len);
-    if (pwd_len > 64) pwd_len = 64;
     memcpy(cfg.sta.password, pwd, pwd_len);
     if (pwd_len > 0)
         cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
@@ -413,12 +414,13 @@ esp_err_t espradio_sta_set_config(const char *ssid, int ssid_len,
 esp_err_t espradio_ap_set_config(const char *ssid, int ssid_len,
                                  const char *pwd, int pwd_len,
                                  uint8_t channel, int auth_open) {
+    if (ssid_len < 0 || pwd_len < 0 || ssid_len > 32 || pwd_len > 64) {
+        return ESP_ERR_INVALID_ARG;
+    }
     wifi_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
-    if (ssid_len > 32) ssid_len = 32;
     memcpy(cfg.ap.ssid, ssid, ssid_len);
     cfg.ap.ssid_len = (uint8_t)ssid_len;
-    if (pwd_len > 64) pwd_len = 64;
     memcpy(cfg.ap.password, pwd, pwd_len);
     cfg.ap.channel = channel ? channel : 1;
     cfg.ap.max_connection = 4;
