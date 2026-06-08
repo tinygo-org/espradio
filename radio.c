@@ -399,6 +399,8 @@ esp_err_t espradio_set_country_eu_manual(void) {
 
 esp_err_t espradio_sta_set_config(const char *ssid, int ssid_len,
                                   const char *pwd, int pwd_len) {
+    if (ssid_len < 0 || pwd_len < 0)
+        return ESP_ERR_INVALID_ARG;
     wifi_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
     if (ssid_len > 32) ssid_len = 32;
@@ -413,6 +415,8 @@ esp_err_t espradio_sta_set_config(const char *ssid, int ssid_len,
 esp_err_t espradio_ap_set_config(const char *ssid, int ssid_len,
                                  const char *pwd, int pwd_len,
                                  uint8_t channel, int auth_open) {
+    if (ssid_len < 0 || pwd_len < 0)
+        return ESP_ERR_INVALID_ARG;
     wifi_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
     if (ssid_len > 32) ssid_len = 32;
