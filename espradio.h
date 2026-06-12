@@ -26,6 +26,8 @@ void espradio_prewire_wifi_interrupts(void);
 void espradio_wifi_int_to_level(void);
 void espradio_wifi_int_raise_priority(void);
 void espradio_wifi_unmask(void);
+void espradio_snapshot_intenable(void);
+void espradio_lower_intlevel(void);
 void espradio_ints_on(uint32_t mask);
 void espradio_ints_off(uint32_t mask);
 int32_t espradio_queue_send(void *queue, void *item, uint32_t block_time_tick);

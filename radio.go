@@ -116,6 +116,11 @@ func startSchedTicker() {
 var wifiInitDone uint32
 
 func schedOnce() {
+	// Snapshot INTENABLE before any blob code runs so that wifi_unmask can
+	// restore TinyGo-owned bits (e.g. GPIO at bit 10 on ESP32-S3) that the
+	// blob may clear via ROM calls (ets_isr_mask) bypassing the OS adapter.
+	C.espradio_snapshot_intenable()
+
 	// Mask WiFi CPU interrupt before the ISR softcall.  On Xtensa (ESP32-S3)
 	// the WiFi interrupt is level-triggered at level 1.  If the MAC asserts
 	// its interrupt while we're already iterating the ISR handlers below,

@@ -21,6 +21,11 @@
  * TinyGo registers its handler on this interrupt via interrupt.New(). */
 #define ESPRADIO_WIFI_CPU_INT  1u
 
+/* TinyGo routes ETS_GPIO_INTR_SOURCE (16) to this CPU interrupt (cpuInterruptFromPin
+ * in machine_esp32c3.go).  Restored after every schedOnce() so that blob ROM
+ * calls (e.g. direct intr_matrix_set) cannot permanently steal the GPIO source. */
+#define ESPRADIO_GPIO_CPU_INT  6u
+
 /* Pre-wire WiFi peripheral interrupt sources to the WiFi CPU interrupt.
  * Must be called before esp_wifi_init so routing is in place before the
  * blob enables the peripheral-side interrupts.
@@ -90,6 +95,20 @@ void espradio_wifi_int_raise_priority(void) {
     __asm__ volatile ("fence" ::: "memory");
 }
 
+/* INTC enable snapshot taken at the start of schedOnce(), before any blob
+ * code runs.  espradio_wifi_unmask() ORs this back so that bits cleared by
+ * blob OS-adapter ints_off or ROM calls during processing are restored — e.g.
+ * bit 6 which TinyGo uses for GPIO on ESP32-C3. */
+static volatile uint32_t s_intenable_snapshot;
+
+void espradio_snapshot_intenable(void) {
+    s_intenable_snapshot = ESPRADIO_INTC_ENABLE_REG;
+}
+
+/* No-op on RISC-V: PS.INTLEVEL does not exist. */
+void espradio_lower_intlevel(void) {
+}
+
 /* Called at the end of espradio_call_wifi_isr().  In level-triggered
  * mode, mask CPU int 1 via the enable register to prevent re-entry
  * if the hardware line is still asserted after the blob ISR ran.
@@ -101,6 +120,24 @@ void espradio_wifi_isr_post_mask(void) {
 }
 
 void espradio_wifi_unmask(void) {
-    ESPRADIO_INTC_ENABLE_REG |= (1u << ESPRADIO_WIFI_CPU_INT);
+    /* Restore any TinyGo-owned INTC enable bits that blob code may have
+     * cleared, then ensure the WiFi CPU interrupt is enabled. */
+    ESPRADIO_INTC_ENABLE_REG |= s_intenable_snapshot | (1u << ESPRADIO_WIFI_CPU_INT);
+
+    /* Re-route GPIO source → TinyGo's CPU interrupt in case blob ROM code
+     * (direct intr_matrix_set calls inside the binary) corrupted it during
+     * schedOnce() processing. */
+    intr_matrix_set(0, ETS_GPIO_INTR_SOURCE, ESPRADIO_GPIO_CPU_INT);
+
+    /* Re-fire GPIO CPU interrupt if it was registered and its INTC enable bit
+     * was cleared during schedOnce (blob ets_isr_mask or ints_off).  On
+     * RISC-V, GPIO is level-triggered so toggling the ENABLE bit causes the
+     * controller to re-sample the level and assert the interrupt if the GPIO
+     * source is still pending. */
+    if (s_intenable_snapshot & (1u << ESPRADIO_GPIO_CPU_INT)) {
+        ESPRADIO_INTC_ENABLE_REG &= ~(1u << ESPRADIO_GPIO_CPU_INT);
+        __asm__ volatile ("fence" ::: "memory");
+        ESPRADIO_INTC_ENABLE_REG |=  (1u << ESPRADIO_GPIO_CPU_INT);
+    }
 }
 
