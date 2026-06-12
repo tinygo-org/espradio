@@ -47,7 +47,7 @@ func NewStack(dev *NetDev, cfg StackConfig) (*Stack, error) {
 
 	stack := &Stack{dev: dev}
 	const MTU = MaxFrameSize - ethernet.MaxOverheadSize + 4 // CRC not included:+4
-	err = stack.s.Reset(xnet.StackConfig{
+	xcfg := xnet.StackConfig{
 		DNSServer:         cfg.DNSServer,
 		NTPServer:         cfg.NTPServer,
 		Hostname:          cfg.Hostname,
@@ -57,7 +57,11 @@ func NewStack(dev *NetDev, cfg StackConfig) (*Stack, error) {
 		HardwareAddress:   mac,
 		MTU:               MTU,
 		PassivePeers:      cfg.PassivePeers,
-	})
+	}
+	if cfg.StaticAddress.IsValid() && cfg.StaticAddress.Is4() {
+		xcfg.StaticAddress4 = cfg.StaticAddress.As4()
+	}
+	err = stack.s.Reset(xcfg)
 	if err != nil {
 		return nil, err
 	}
