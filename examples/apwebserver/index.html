@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TinyGo HTTP Server</title>
+<style>
+body{font-family:Arial,sans-serif;background:#f4f4f4;margin:0;padding:20px;display:flex;justify-content:center;min-height:100vh}
+.c{text-align:center}h1{color:#333;margin:0 0 12px}p{color:#555;margin:6px 0}
+a{color:#07c;text-decoration:none}a:hover{text-decoration:underline}
+input,button{padding:6px;margin:4px}button{cursor:pointer}
+.links{list-style:none;padding:0;margin:12px 0}
+.links li{margin:4px 0}
+</style>
+</head>
+<body><div class="c">
+<h1>TinyGo HTTP Server</h1>
+<ul class="links">
+<li><a href="/hello">/hello</a></li>
+<li><a href="/6">/6 (Tetris)</a></li>
+</ul>
+
+<p>LED</p>
+<button onclick="fetch('/on')">On</button>
+<button onclick="fetch('/off')">Off</button>
+
+<p>cnt: <span id="cnt"></span></p>
+<button onclick="incrCnt()">+1</button>
+<form style="display:inline" onsubmit="setCnt();return false">
+<input type="text" name="cnt" placeholder="value">
+<button type="submit">Set</button>
+</form>
+
+<p style="margin-top:24px;color:#999;font-size:small">🌐 Powered by <a href="https://github.com/soypat/lneto">lneto</a></p>
+</div>
+<script>
+var counter=0;
+function fetchCnt(){fetch("/cnt").then(r=>r.json()).then(j=>{counter=j.cnt;cnt.innerHTML=counter})}
+function incrCnt(){counter++;fetch("/cnt?cnt="+counter,{method:"POST"}).then(r=>r.json()).then(j=>{counter=j.cnt;cnt.innerHTML=counter})}
+function setCnt(){var v=document.getElementsByName("cnt")[0].value;fetch("/cnt",{method:"POST",body:"cnt="+v,headers:{"Content-Type":"application/x-www-form-urlencoded"}}).then(r=>r.json()).then(j=>{counter=j.cnt;cnt.innerHTML=counter})}
+fetchCnt();
+</script>
+</body>
+</html>
