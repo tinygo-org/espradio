@@ -435,6 +435,18 @@ func StartAP(cfg APConfig) error {
 	if code := C.espradio_esp_wifi_start(); code != C.ESP_OK {
 		return makeError(code)
 	}
+
+	// Same post-start sequence as Start(): disable modem-sleep, pump the
+	// scheduler so ppTask processes the START command (pp_attach, ppInitTxq,
+	// etc.) and the critical ROM pointer variables get initialised, then
+	// snapshot them so espradio_restore_rom_ptrs can protect every TX.
+	C.esp_wifi_set_ps(C.WIFI_PS_NONE)
+	for i := 0; i < 40; i++ {
+		schedOnce()
+		runtime.Gosched()
+	}
+	C.espradio_save_rom_ptrs()
+
 	return nil
 }
 

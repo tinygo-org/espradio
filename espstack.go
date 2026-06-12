@@ -20,6 +20,7 @@ type Stack struct {
 // StackConfig configures the lneto-based network stack.
 type StackConfig struct {
 	StaticAddress netip.Addr
+	StaticSubnet  netip.Prefix
 	DNSServer     netip.Addr
 	NTPServer     netip.Addr
 	RandSeed      int64
@@ -64,6 +65,17 @@ func NewStack(dev *NetDev, cfg StackConfig) (*Stack, error) {
 	err = stack.s.Reset(xcfg)
 	if err != nil {
 		return nil, err
+	}
+	switch {
+	case cfg.StaticSubnet.IsValid():
+		addr := cfg.StaticSubnet.Addr()
+		if addr.Is4() {
+			stack.s.SetSubnet4(addr.As4(), uint8(cfg.StaticSubnet.Bits()))
+		}
+	case cfg.StaticAddress.IsValid() && cfg.StaticAddress.Is4():
+		// Default: derive a /24 subnet from the static address so passive
+		// ARP learning works without an explicit subnet.
+		stack.s.SetSubnet4(cfg.StaticAddress.As4(), 24)
 	}
 	dev.SetEthRecvHandler(func(pkt []byte) error {
 		return stack.s.IngressEthernet(pkt)

@@ -267,7 +267,7 @@ uint16_t espradio_netif_rx_pop(void *dst, uint16_t dst_len) {
 }
 
 int espradio_netif_tx(void *buf, uint16_t len) {
-    if (!s_sta_connected) return ESP_ERR_WIFI_NOT_CONNECT;
+    if (s_active_if == WIFI_IF_STA && !s_sta_connected) return ESP_ERR_WIFI_NOT_CONNECT;
     espradio_restore_rom_ptrs();
     return esp_wifi_internal_tx(s_active_if, buf, len);
 }
