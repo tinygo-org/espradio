@@ -6,8 +6,15 @@ import (
 	"time"
 
 	"github.com/soypat/lneto"
+	"github.com/soypat/lneto/dhcp/dhcpv4"
 	"github.com/soypat/lneto/ethernet"
+	"github.com/soypat/lneto/ipv4"
 	"github.com/soypat/lneto/x/xnet"
+)
+
+var (
+	errDHCPInvalidSubnet = errors.New("dhcp server: invalid subnet")
+	errDHCPNoStaticAddr  = errors.New("dhcp server: stack has no static IPv4 address")
 )
 
 // Stack wraps an lneto async network stack on top of a NetDev (EthernetDevice).
@@ -15,6 +22,7 @@ type Stack struct {
 	s       xnet.StackAsync
 	dev     *NetDev
 	rxtxBuf []byte
+	dhcpSrv dhcpv4.Server
 }
 
 // StackConfig configures the lneto-based network stack.
@@ -109,7 +117,8 @@ func (stack *Stack) RecvAndSend() (send, recv int, err error) {
 	}
 	if send == 0 {
 		return send, recv, err
-	} else if pcapdebug {
+	}
+	if pcapdebug {
 		printPacket("OUT", stack.rxtxBuf[:send])
 	}
 
@@ -148,4 +157,34 @@ func (stack *Stack) SetupWithDHCP(cfg DHCPConfig) (*xnet.DHCPResults, error) {
 	}
 	lstack.SetGatewayHardwareAddr(gatewayHW)
 	return dhcpResults, nil
+}
+
+// SetupWithDHCPServer starts a DHCPv4 server on the stack, assigning addresses
+// from the given subnet. The stack's own address must already be set (via
+// StackConfig.StaticAddress). subnet should cover the AP's address, e.g.
+// netip.MustParsePrefix("192.168.4.0/24").
+func (stack *Stack) SetupWithDHCPServer(subnet netip.Prefix) error {
+	if !subnet.IsValid() || !subnet.Addr().Is4() {
+		return errDHCPInvalidSubnet
+	}
+	lstack := stack.LnetoStack()
+	serverAddr := lstack.Addr4()
+	if serverAddr == [4]byte{} {
+		return errDHCPNoStaticAddr
+	}
+	if !subnet.Contains(netip.AddrFrom4(serverAddr)) {
+		return errDHCPInvalidSubnet
+	}
+	err := stack.dhcpSrv.Configure(dhcpv4.ServerConfig{
+		ServerAddr: serverAddr,
+		Gateway:    serverAddr,
+		Subnet:     ipv4.PrefixFromNetip(subnet),
+	})
+	if err != nil {
+		return err
+	}
+	// Pass zero raddr so lneto's UDP source-IP filter accepts packets from any
+	// source (0.0.0.0 disables the filter; required for DHCP clients that have
+	// no IP yet when sending Discovers/Requests).
+	return lstack.RegisterUDP4(&stack.dhcpSrv, [4]byte{}, dhcpv4.DefaultClientPort)
 }

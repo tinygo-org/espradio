@@ -6,7 +6,9 @@ package espradio
 */
 import "C"
 
-import "strconv"
+import (
+	"strconv"
+)
 
 // Error is an error from the radio stack.
 type Error C.esp_err_t

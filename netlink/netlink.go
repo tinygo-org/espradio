@@ -130,6 +130,7 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 				RxBufSize:          1024,
 				EstablishedTimeout: 2 * time.Second,
 				ClosingTimeout:     2 * time.Second,
+				NewBackoff:         func() lneto.BackoffStrategy { return pollBackoff },
 			},
 		})
 

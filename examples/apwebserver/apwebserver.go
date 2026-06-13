@@ -1,7 +1,7 @@
 // This example starts the device as a WiFi access point and serves a web page
-// on port :80. Connect to the AP with the SSID and password defined below,
-// then configure your device with a static IP in the 192.168.4.0/24 subnet
-// (e.g. 192.168.4.2, gateway 192.168.4.1) and browse to http://192.168.4.1
+// on port :80. Connect to the AP with the SSID and password defined below.
+// Clients receive IP addresses automatically via the built-in DHCP server.
+// Browse to http://192.168.4.1 once connected.
 //
 // tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=YourSSID -X main.password=YourPassword" -monitor ./examples/apwebserver
 package main
@@ -47,10 +47,11 @@ func main() {
 			Password: password,
 			Channel:  6,
 		},
-		StaticAddr:   netip.MustParseAddr(apIP),
-		MaxUDPPorts:  2,
-		MaxTCPPorts:  4,
-		PassivePeers: 255,
+		StaticAddr:       netip.MustParseAddr(apIP),
+		EnableDHCPServer: true,
+		MaxUDPPorts:      2,
+		MaxTCPPorts:      4,
+		PassivePeers:     255,
 	})
 	if err != nil {
 		failure("could not start AP: " + err.Error())

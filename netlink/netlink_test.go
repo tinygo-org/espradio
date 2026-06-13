@@ -1,9 +1,11 @@
 package netlink
 
 import (
+	"net/netip"
 	"testing"
 
 	nl "tinygo.org/x/drivers/netlink"
+	"tinygo.org/x/espradio"
 )
 
 func TestNetConnectMissingSSID(t *testing.T) {
@@ -49,5 +51,56 @@ func TestGetHostByNameInvalidIPv4(t *testing.T) {
 	_, err := e.GetHostByName("999.999.999.999")
 	if err == nil {
 		t.Error("GetHostByName(\"999.999.999.999\") = nil error; want parse error")
+	}
+}
+
+func TestAPParamsWithDefaultsEmpty(t *testing.T) {
+	got := APConnectParams{}.withDefaults()
+	if want := netip.MustParseAddr("192.168.4.1"); got.StaticAddr != want {
+		t.Errorf("StaticAddr = %v; want %v", got.StaticAddr, want)
+	}
+	if got.Hostname != defaultHostname {
+		t.Errorf("Hostname = %q; want %q", got.Hostname, defaultHostname)
+	}
+	if got.PassivePeers != 255 {
+		t.Errorf("PassivePeers = %d; want 255", got.PassivePeers)
+	}
+}
+
+func TestAPParamsWithDefaultsHostnameFromSSID(t *testing.T) {
+	got := APConnectParams{
+		APConfig: espradio.APConfig{SSID: "my-network"},
+	}.withDefaults()
+	if got.Hostname != "my-network" {
+		t.Errorf("Hostname = %q; want %q", got.Hostname, "my-network")
+	}
+}
+
+func TestAPParamsWithDefaultsPreservesValues(t *testing.T) {
+	in := APConnectParams{
+		APConfig:     espradio.APConfig{SSID: "ssid"},
+		StaticAddr:   netip.MustParseAddr("10.0.0.1"),
+		Hostname:     "explicit-host",
+		PassivePeers: 16,
+	}
+	got := in.withDefaults()
+	if got.StaticAddr != in.StaticAddr {
+		t.Errorf("StaticAddr = %v; want %v", got.StaticAddr, in.StaticAddr)
+	}
+	if got.Hostname != in.Hostname {
+		t.Errorf("Hostname = %q; want %q", got.Hostname, in.Hostname)
+	}
+	if got.PassivePeers != in.PassivePeers {
+		t.Errorf("PassivePeers = %d; want %d", got.PassivePeers, in.PassivePeers)
+	}
+}
+
+func TestAPParamsWithDefaultsRejectsIPv6(t *testing.T) {
+	// A non-IPv4 StaticAddr must be replaced with the IPv4 default.
+	got := APConnectParams{
+		StaticAddr: netip.MustParseAddr("fe80::1"),
+	}.withDefaults()
+	if want := netip.MustParseAddr("192.168.4.1"); got.StaticAddr != want {
+		t.Errorf("StaticAddr = %v; want %v", got.StaticAddr, want)
 	}
 }
