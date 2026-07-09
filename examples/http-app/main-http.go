@@ -83,9 +83,10 @@ func main() {
 
 	println("creating lneto stack...")
 	espstack, err := espradio.NewStack(nd, espradio.StackConfig{
-		Hostname:    ssid,
-		MaxUDPPorts: 2,
-		MaxTCPPorts: 1,
+		Hostname:     ssid,
+		MaxUDPPorts:  2,
+		MaxTCPPorts:  1,
+		PassivePeers: 255,
 	})
 	if err != nil {
 		failure("stack failed: " + err.Error())
@@ -139,6 +140,7 @@ func main() {
 			cs.hdr.Reset(cs.httpBuf[:])
 			return cs
 		},
+		NewBackoff: func() lneto.BackoffStrategy { return pollBackoff },
 	})
 	if err != nil {
 		failure("tcppool create: " + err.Error())
@@ -181,6 +183,10 @@ func main() {
 		jobCh <- connJob{conn: conn, cs: userData.(*connState), stack: lstack}
 	}
 }
+
+var pollBackoff = lneto.BackoffStrategy(func(_ uint) time.Duration {
+	return pollTime
+})
 
 // connState holds all per-connection buffers, pre-allocated during pool init.
 // Eliminates per-connection heap escapes of local arrays (buf, dynBuf, csBuf)

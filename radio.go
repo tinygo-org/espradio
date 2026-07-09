@@ -1,4 +1,4 @@
-//go:build esp32c3 || esp32c3_qemu_target || esp32s3
+//go:build esp32c3 || esp32c3_qemu_target || esp32s3 || esp32
 
 package espradio
 
@@ -195,8 +195,8 @@ func Enable(config Config) error {
 	if config.ArenaPoolSize > 0 {
 		poolSize = config.ArenaPoolSize
 	}
-	arenaPool = make([]byte, poolSize)
-	C.espradio_arena_init((*C.uint8_t)(unsafe.Pointer(&arenaPool[0])), C.size_t(poolSize))
+	arenaPool = makeArenaPool(poolSize)
+	C.espradio_arena_init((*C.uint8_t)(unsafe.Pointer(&arenaPool[0])), C.size_t(len(arenaPool)))
 
 	startSchedTicker()
 	time.Sleep(schedTickerMs * time.Millisecond)
@@ -225,6 +225,9 @@ func Enable(config Config) error {
 	atomic.StoreUint32(&wifiInitDone, 1)
 	schedOnce()
 	C.espradio_netif_init_netstack_cb()
+
+	// set default transmit level of 20 dBm (100 mW) for ESP32.
+	C.esp_wifi_set_max_tx_power(C.int8_t(20))
 
 	return nil
 }
@@ -901,7 +904,6 @@ func espradio_semphr_take(semphr unsafe.Pointer, block_time_tick uint32) int32 {
 		timeout = time.Duration(block_time_tick) * time.Millisecond
 	}
 
-	iters := 0
 	for {
 		if semTryTake(sem) {
 			return 1
@@ -909,7 +911,6 @@ func espradio_semphr_take(semphr unsafe.Pointer, block_time_tick uint32) int32 {
 		if !forever && time.Since(start) >= timeout {
 			return 0
 		}
-		iters++
 		safeGosched()
 	}
 }

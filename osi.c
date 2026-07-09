@@ -16,7 +16,7 @@ extern wifi_osi_funcs_t espradio_osi_funcs;
 static void espradio_wifi_reset_mac(void);
 void espradio_timer_pending_reset(void);
 
-wifi_osi_funcs_t *g_osi_funcs_p;
+__attribute__((weak)) wifi_osi_funcs_t *g_osi_funcs_p;
 
 /* Declared in radio.c — heap-allocated OSI table placed far from BSS to avoid
  * WiFi DMA corruption.  All runtime table updates go here AND to g_wifi_osi_funcs. */
@@ -719,6 +719,11 @@ static void espradio_wifi_clock_disable_noop(void) { }
 static void espradio_wifi_rtc_enable_iso_noop(void) { }
 static void espradio_wifi_rtc_disable_iso_noop(void) { }
 
+#if CONFIG_IDF_TARGET_ESP32 || CONFIG_ESP_WIFI_TARGET_ESP32
+extern void esp_phy_common_clock_enable(void);
+extern void esp_phy_common_clock_disable(void);
+#endif
+
 static void espradio_phy_disable(void) {
     phy_wifi_enable_set(0);
     esp_phy_disable(ESPRADIO_PHY_MODEM_WIFI);
@@ -1221,6 +1226,23 @@ static uint32_t espradio_slowclk_cal_get(void) {
 
 #define LOG_MSG_MAX 384
 
+#if CONFIG_IDF_TARGET_ESP32
+/* Direct UART0 TX with FIFO drain — putchar/printf varargs are unreliable on
+ * the ESP32 Xtensa cgo path, and putchar buffering can stall.  This writes
+ * straight to the UART0 FIFO and waits for it to drain. */
+static void espradio_uart_putc(char c) {
+    volatile uint32_t *fifo = (volatile uint32_t *)0x3FF40000;
+    volatile uint32_t *status = (volatile uint32_t *)0x3FF4001C;
+    *fifo = (uint32_t)(unsigned char)c;
+    while (((*status >> 16) & 0xFF) != 0) {
+        /* wait for TX FIFO to drain */
+    }
+}
+#define ESPRADIO_PUTC(c) espradio_uart_putc(c)
+#else
+#define ESPRADIO_PUTC(c) putchar(c)
+#endif
+
 static void espradio_log_writev(unsigned int level, const char* tag, const char* format, va_list args) {
     static char buf[LOG_MSG_MAX];
     int n = vsnprintf(buf, sizeof(buf), format, args);
@@ -1228,11 +1250,18 @@ static void espradio_log_writev(unsigned int level, const char* tag, const char*
         if ((size_t)n >= sizeof(buf)) {
             buf[sizeof(buf)-1] = '\0';
         }
+        /* Emit via putchar (no printf varargs — those are unreliable on the
+         * Xtensa cgo path). vsnprintf above uses va_list which is fine. */
+        const char *p;
+        for (p = "[wifi]"; *p; p++) ESPRADIO_PUTC(*p);
         if (tag && tag[0]) {
-            printf("[wifi][%u][%s] %s\n", level, tag, buf);
-        } else {
-            printf("[wifi][%u] %s\n", level, buf);
+            ESPRADIO_PUTC('[');
+            for (p = tag; *p; p++) ESPRADIO_PUTC(*p);
+            ESPRADIO_PUTC(']');
         }
+        ESPRADIO_PUTC(' ');
+        for (p = buf; *p; p++) ESPRADIO_PUTC(*p);
+        ESPRADIO_PUTC('\n');
     }
 }
 
@@ -1562,6 +1591,12 @@ static int espradio_coex_adapter_xtal_freq_get(void) {
 
 coex_adapter_funcs_t g_coex_adapter_funcs = {
     ._version = COEX_ADAPTER_VERSION,
+#if CONFIG_IDF_TARGET_ESP32
+    ._spin_lock_create = espradio_spin_lock_create,
+    ._spin_lock_delete = espradio_spin_lock_delete,
+    ._int_disable = espradio_wifi_int_disable,
+    ._int_enable = espradio_wifi_int_restore,
+#endif
     ._task_yield_from_isr = espradio_coex_adapter_task_yield_from_isr,
     ._semphr_create = espradio_coex_adapter_semphr_create,
     ._semphr_delete = espradio_coex_adapter_semphr_delete,
@@ -1699,6 +1734,10 @@ wifi_osi_funcs_t espradio_osi_funcs = {
     ._wifi_apb80m_release = espradio_wifi_apb80m_release,
     ._phy_disable = espradio_phy_disable,
     ._phy_enable = espradio_phy_enable,
+#if CONFIG_IDF_TARGET_ESP32 || CONFIG_ESP_WIFI_TARGET_ESP32
+    ._phy_common_clock_enable = esp_phy_common_clock_enable,
+    ._phy_common_clock_disable = esp_phy_common_clock_disable,
+#endif
     ._phy_update_country_info = espradio_phy_update_country_info,
     ._read_mac = espradio_read_mac,
     ._timer_arm = espradio_timer_arm,
@@ -1727,7 +1766,9 @@ wifi_osi_funcs_t espradio_osi_funcs = {
     ._get_random = espradio_get_random,
     ._get_time = espradio_get_time,
     ._random = espradio_random,
+#if !CONFIG_IDF_TARGET_ESP32 && !CONFIG_ESP_WIFI_TARGET_ESP32
     ._slowclk_cal_get = espradio_slowclk_cal_get,
+#endif
     ._log_write = espradio_log_write,
     ._log_writev = espradio_log_writev,
     ._log_timestamp = espradio_log_timestamp,

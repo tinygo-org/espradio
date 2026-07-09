@@ -76,9 +76,10 @@ func main() {
 
 	println("creating lneto stack...")
 	espstack, err := espradio.NewStack(nd, espradio.StackConfig{
-		Hostname:    ssid,
-		MaxUDPPorts: 2,
-		MaxTCPPorts: 1,
+		Hostname:     ssid,
+		MaxUDPPorts:  2,
+		MaxTCPPorts:  1,
+		PassivePeers: 255,
 	})
 	if err != nil {
 		failure("stack failed: " + err.Error())

@@ -4,7 +4,13 @@
 
 [TinyGo](https://tinygo.org/) package for wireless communication on [Espressif](https://www.espressif.com/) ESP32xx microcontrollers.
 
-Currently supports WiFi on the [`esp32c3`](https://www.espressif.com/en/products/socs/esp32-c3) single-core 32-bit RISC-V MCU and [`esp32s3`](https://www.espressif.com/en/products/socs/esp32-s3) dual-core XTensa LX7 MCU. Bluetooth is in progress, along with more processors.
+Currently supports WiFi on the following processors:
+
+- [`esp32`](https://www.espressif.com/en/products/socs/esp32) dual-core XTensa LX6 MCU. 
+- [`esp32c3`](https://www.espressif.com/en/products/socs/esp32-c3) single-core 32-bit RISC-V MCU
+- [`esp32s3`](https://www.espressif.com/en/products/socs/esp32-s3) dual-core XTensa LX7 MCU. 
+
+Bluetooth is in progress, along with more processors.
 
 ### Features
 

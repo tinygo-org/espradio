@@ -43,8 +43,8 @@ extern wifi_osi_funcs_t *g_osi_funcs_p;
 /* Stub for the WIFI_INIT_CONFIG_DEFAULT() macro; also kept filled as fallback. */
 wifi_osi_funcs_t g_wifi_osi_funcs = {0};
 
-/* Heap-allocated copy of the OSI table. Placed well away from BSS/DATA to avoid
- * WiFi DMA corruption (PMP confirmed the zeroing bypasses the CPU). */
+/* Arena-allocated copy of the OSI table (lives in SRAM1 pool 7/6, isolated
+ * from BSS/DATA in SRAM2). */
 wifi_osi_funcs_t *s_heap_osi_funcs;
 
 extern wifi_osi_funcs_t espradio_osi_funcs;
@@ -234,19 +234,16 @@ esp_err_t espradio_wifi_init(void) {
     RADIO_DBG("espradio: phy_get_romfunc_addr g_phyFuns=%p\n", g_phyFuns);
 #endif
 
-    /* Allocate the OSI table on the heap, with 256-byte alignment and a
-     * 256-byte guard region on each side.  PMP analysis proved that the
-     * field-100 zeroing bypasses the CPU (WiFi DMA), so moving the table
-     * far from BSS prevents DMA descriptor mispointing from hitting it. */
+    /* Allocate the OSI table via the arena (SRAM1 pool 7/6, isolated from
+     * BSS/DATA in SRAM2).  Guard regions removed — no longer needed since the
+     * arena moved to a separate SRAM1 region far from BSS. */
     {
-        size_t total = 256 + sizeof(wifi_osi_funcs_t) + 256;
-        uint8_t *raw = (uint8_t *)malloc(total);
-        if (!raw) return ESP_ERR_NO_MEM;
-        memset(raw, 0, total);
-        /* Align the table start to a 256-byte boundary within the allocation. */
-        uintptr_t table_addr = ((uintptr_t)raw + 256 + 255) & ~(uintptr_t)255;
-        s_heap_osi_funcs = (wifi_osi_funcs_t *)table_addr;
+        s_heap_osi_funcs = (wifi_osi_funcs_t *)malloc(sizeof(wifi_osi_funcs_t));
+        if (!s_heap_osi_funcs) return ESP_ERR_NO_MEM;
         memcpy(s_heap_osi_funcs, &espradio_osi_funcs, sizeof(wifi_osi_funcs_t));
+        RADIO_DBG("espradio: s_heap_osi_funcs=%p sizeof=%u\n",
+                  (void*)s_heap_osi_funcs,
+                  (unsigned)sizeof(wifi_osi_funcs_t));
     }
 
     /* Populate g_wifi_osi_funcs as a backup; do NOT set g_osi_funcs_p yet.
@@ -262,12 +259,13 @@ esp_err_t espradio_wifi_init(void) {
      * == cfg_base (not cfg_base+4), causing memcpy to overwrite cfg.osi_funcs
      * with size=44 and cfg.wpa_crypto_funcs.size with version=1.
      *
-     * Two-layer fix:
-     *   1. static + aligned(8) guarantees cfg_base bits 0-2 are always 0,
-     *      so the OR equals the ADD for any offset.
-     *   2. Use offsetof + char* arithmetic for the wpa_crypto_funcs pointer
-     *      so the compiler emits ADD rather than OR regardless of address. */
-    static wifi_init_config_t cfg __attribute__((aligned(8)));
+     * Robust fix: align cfg to 256 bytes (>= sizeof(wifi_init_config_t)).
+     * Then cfg_base has its low 8 bits zero, so (cfg_base | offset) equals
+     * (cfg_base + offset) for every field offset (< 256), regardless of which
+     * field the compiler addresses.  aligned(8) was insufficient on ESP32
+     * where higher-offset field writes (bit 3+) could OR back onto offset 0
+     * and zero cfg.osi_funcs. */
+    static wifi_init_config_t cfg __attribute__((aligned(256)));
     memset(&cfg, 0, sizeof(cfg));
     cfg.osi_funcs              = s_heap_osi_funcs;
     cfg.static_rx_buf_num      = 10;
@@ -323,6 +321,18 @@ esp_err_t espradio_wifi_init(void) {
     esp_err_t coex_rc = coex_pre_init();
     RADIO_DBG("espradio: coex_pre_init returned %d\n", (int)coex_rc);
     RADIO_DBG("espradio: before esp_wifi_init_internal cfg.osi_funcs=%p\n", (void*)cfg.osi_funcs);
+    RADIO_DBG("espradio: &cfg=%p s_heap=%p cfg.magic=%08x\n",
+              (void*)&cfg, (void*)s_heap_osi_funcs, (unsigned)cfg.magic);
+    if (cfg.osi_funcs == NULL) {
+        RADIO_DBG("espradio: CFG_OSI_NULL\n");
+    } else {
+        RADIO_DBG("espradio: CFG_OSI_OK\n");
+    }
+    if (s_heap_osi_funcs == NULL) {
+        RADIO_DBG("espradio: SHEAP_NULL\n");
+    } else {
+        RADIO_DBG("espradio: SHEAP_OK\n");
+    }
 
     esp_err_t ret = esp_wifi_init_internal(&cfg);
     RADIO_DBG("espradio: esp_wifi_init_internal returned %d\n", (int)ret);

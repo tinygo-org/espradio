@@ -13,17 +13,21 @@ update: update-esp-wifi
 	mkdir -p blobs/libs
 	cp -rp esp-wifi/c/headers      blobs
 	cp -rp esp-wifi/c/include      blobs
+	cp -rp esp-wifi/esp-wifi-sys-esp32/libs  blobs/libs/esp32
 	cp -rp esp-wifi/esp-wifi-sys-esp32c3/libs blobs/libs/esp32c3
 	cp -rp esp-wifi/esp-wifi-sys-esp32s3/libs blobs/libs/esp32s3
 
 patch-esp32s3:
 	go run ./tools/patch_xtensa_literals.go blobs/libs/esp32s3/*.a
 
+patch-esp32:
+	go run ./tools/patch_xtensa_literals.go blobs/libs/esp32/*.a
+
 smoke-test:
 	mkdir -p build
 	rm -rf build/*
 	@for example in ./examples/*/; do \
-		for target in xiao-esp32c3 xiao-esp32s3; do \
+		for target in xiao-esp32c3 xiao-esp32s3 esp32-mini32; do \
 			echo "CGO_CFLAGS_ALLOW='$(CGO_CFLAGS_ALLOW_PATTERN)' tinygo build -target=$$target -size short -o build/$$(basename $$example) $$example"; \
 			CGO_CFLAGS_ALLOW='$(CGO_CFLAGS_ALLOW_PATTERN)' tinygo build -target=$$target -size short -o build/$$(basename $$example) $$example || exit 1; \
 		done; \

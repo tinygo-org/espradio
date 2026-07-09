@@ -143,6 +143,15 @@ void espradio_post_start_cb(void) {
         g_osi_funcs_p = s_heap_osi_funcs;
     }
 
+#if !CONFIG_IDF_TARGET_ESP32
+    /* The following table relocations are DMA-corruption workarounds calibrated
+     * for the ESP32-S3/C3 blobs (fixed entry counts and the g_phyFuns table
+     * size/location).  On the original ESP32 the blob's table layouts differ,
+     * so copying S3-sized tables over-reads adjacent heap memory and captures
+     * garbage pointers — ppTask then jumps into the arena (InstructionFetchError
+     * at a DRAM address).  Skip them for ESP32; the blob manages these tables
+     * itself. */
+
     /* Relocate pp_wdev_funcs from the heap (DMA-corruptible) to a static
      * .bss buffer where DMA cannot reach. */
     {
@@ -173,6 +182,7 @@ void espradio_post_start_cb(void) {
             s_phyFuns_save[i] = rom_table[i];
         g_phyFuns = s_phyFuns_save;
     }
+#endif /* !CONFIG_IDF_TARGET_ESP32 */
 }
 
 /* Snapshot the critical ROM pointers after the blob has fully initialised
