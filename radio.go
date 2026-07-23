@@ -497,13 +497,15 @@ const taskStackSize = 8192
 
 //export espradio_task_create_pinned_to_core
 func espradio_task_create_pinned_to_core(task_func unsafe.Pointer, name *C.char, stack_depth uint32, param unsafe.Pointer, prio uint32, task_handle *unsafe.Pointer, core_id uint32) int32 {
-	ch := make(chan struct{}, 1)
+	var ready uint32
 	go func() {
 		*task_handle = tinygo_task_current()
-		close(ch)
+		atomic.StoreUint32(&ready, 1)
 		espradio_run_task(task_func, param)
 	}()
-	<-ch
+	for atomic.LoadUint32(&ready) == 0 {
+		runtime.Gosched()
+	}
 	return 1
 }
 
@@ -538,6 +540,11 @@ func espradio_task_yield_go() {
 
 //export espradio_time_us_now
 func espradio_time_us_now() uint64 {
+	return uint64(time.Now().UnixMicro())
+}
+
+// timeUsNow returns monotonic microseconds without allocating a time.Time.
+func timeUsNow() uint64 {
 	return uint64(time.Now().UnixMicro())
 }
 
@@ -804,25 +811,23 @@ func espradio_event_group_wait_bits(ptr unsafe.Pointer, bitsToWaitFor uint32, cl
 	eg := (*eventGroup)(ptr)
 	want := bitsToWaitFor
 
-	matches := func(bits uint32) bool {
-		if waitForAllBits != 0 {
-			return bits&want == want
-		}
-		return bits&want != 0
-	}
-
 	forever := blockTimeTick == C.OSI_FUNCS_TIME_BLOCKING
-	start := time.Now()
-	var timeout time.Duration
+	startUs := timeUsNow()
+	var timeoutUs uint64
 	if !forever {
-		timeout = time.Duration(blockTimeTick) * time.Millisecond
+		timeoutUs = uint64(blockTimeTick) * 1000
 	}
 
 	var snapshot uint32
 	for {
 		eg.mu.Lock()
 		snapshot = eg.bits
-		ok := matches(snapshot)
+		var ok bool
+		if waitForAllBits != 0 {
+			ok = snapshot&want == want
+		} else {
+			ok = snapshot&want != 0
+		}
 		if ok {
 			if clearOnExit != 0 {
 				eg.bits &^= want
@@ -831,7 +836,7 @@ func espradio_event_group_wait_bits(ptr unsafe.Pointer, bitsToWaitFor uint32, cl
 			return snapshot
 		}
 		eg.mu.Unlock()
-		if blockTimeTick == 0 || (!forever && time.Since(start) >= timeout) {
+		if blockTimeTick == 0 || (!forever && (timeUsNow()-startUs) >= timeoutUs) {
 			return snapshot
 		}
 		safeGosched()
@@ -850,6 +855,8 @@ var (
 	wifiThreadSemMu   sync.Mutex
 	wifiThreadSemByTH = map[unsafe.Pointer]*semaphore{}
 	wifiThreadSemNil  semaphore
+	threadSems        [8]semaphore
+	threadSemIndex    uint32
 )
 
 func wifiThreadSemOwner(semphr unsafe.Pointer) unsafe.Pointer {
@@ -898,17 +905,17 @@ func espradio_semphr_take(semphr unsafe.Pointer, block_time_tick uint32) int32 {
 	}
 
 	forever := block_time_tick == C.OSI_FUNCS_TIME_BLOCKING
-	start := time.Now()
-	var timeout time.Duration
+	startUs := timeUsNow()
+	var timeoutUs uint64
 	if !forever {
-		timeout = time.Duration(block_time_tick) * time.Millisecond
+		timeoutUs = uint64(block_time_tick) * 1000
 	}
 
 	for {
 		if semTryTake(sem) {
 			return 1
 		}
-		if !forever && time.Since(start) >= timeout {
+		if !forever && (timeUsNow()-startUs) >= timeoutUs {
 			return 0
 		}
 		safeGosched()
@@ -938,7 +945,11 @@ func espradio_wifi_thread_semphr_get() unsafe.Pointer {
 	}
 	sem := wifiThreadSemByTH[task]
 	if sem == nil {
-		sem = &semaphore{}
+		i := atomic.AddUint32(&threadSemIndex, 1) - 1
+		if i >= uint32(len(threadSems)) {
+			panic("espradio: too many thread semaphores")
+		}
+		sem = &threadSems[i]
 		wifiThreadSemByTH[task] = sem
 	}
 	return unsafe.Pointer(sem)

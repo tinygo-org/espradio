@@ -18,11 +18,14 @@ type NetDev struct {
 	rxHandler func(pkt []byte) error
 }
 
+var netDevInstance NetDev
+
 func startNetDev(apMode int) (*NetDev, error) {
 	if code := C.espradio_netif_start_rx(C.int(apMode)); code != C.ESP_OK {
 		return nil, makeError(code)
 	}
-	return &NetDev{}, nil
+	netDevInstance = NetDev{}
+	return &netDevInstance, nil
 }
 
 // StartNetDev registers the STA RX callback and starts the receive pump.
