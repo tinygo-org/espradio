@@ -16,6 +16,7 @@ import (
 
 	"tinygo.org/x/drivers/netdev"
 	"tinygo.org/x/espradio"
+	"tinygo.org/x/espradio/httputil"
 	link "tinygo.org/x/espradio/netlink"
 )
 
@@ -65,7 +66,7 @@ func main() {
 	http.Handle("/on", logRequest(LED_ON))
 
 	println("HTTP server listening on http://" + apIP + port)
-	err = http.ListenAndServe(apIP+port, nil)
+	err = http.ListenAndServe(apIP+port, httputil.ThrottleHandler(lnk.TCPPoolSize(), nil))
 	if err != nil {
 		failure("http.ListenAndServe: " + err.Error())
 	}

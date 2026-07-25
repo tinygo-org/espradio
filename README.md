@@ -21,6 +21,7 @@ Bluetooth is in progress, along with more processors.
 - TCP and UDP Berkeley sockets API
 - Raw Ethernet frame send/receive
 - MQTT client support (uses [`natiu-mqtt`](https://github.com/soypat/natiu-mqtt))
+- HTTP concurrency throttling for memory-constrained devices (`httputil` package)
 - QEMU simulation target for ESP32-C3
 
 ## How to use
@@ -38,6 +39,7 @@ import (
 
 	"tinygo.org/x/drivers/netdev"
 	nl "tinygo.org/x/drivers/netlink"
+	"tinygo.org/x/espradio/httputil"
 	link "tinygo.org/x/espradio/netlink"
 )
 
@@ -69,7 +71,9 @@ func main() {
 	h, _ := link.Addr()
 	host := h.String()
 	println("HTTP server listening on http://" + host + port)
-	err = http.ListenAndServe(host+port, nil)
+
+	// Throttle to 2 concurrent requests to avoid OOM on ESP32.
+	err = http.ListenAndServe(host+port, httputil.ThrottleHandler(2, nil))
 	for err != nil {
 		println("error:", err.Error())
 		time.Sleep(5 * time.Second)
@@ -360,6 +364,22 @@ AP: rems RSSI -79
 ### starting
 
 Starts the ESP32 radio.
+
+## httputil
+
+The `httputil` package provides HTTP utilities for memory-constrained devices. The main utility is `ThrottleHandler`, which limits concurrent HTTP request processing to a fixed number of slots. When all slots are in use, excess requests are immediately rejected with `503 Service Unavailable` instead of being queued — this prevents unbounded goroutine/memory growth on ESP32-class hardware.
+
+```go
+import "tinygo.org/x/espradio/httputil"
+
+mux := http.NewServeMux()
+mux.HandleFunc("/", handler)
+
+// Allow at most 2 concurrent requests; excess get 503.
+err := http.ListenAndServe(":80", httputil.ThrottleHandler(2, mux))
+```
+
+All responses include `Connection: close` to discourage HTTP/1.1 keep-alive pipelining which consumes memory for idle connections.
 
 ## Architecture
 

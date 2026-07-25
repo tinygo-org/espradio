@@ -26,12 +26,20 @@ type Esplink struct {
 	params   *nl.ConnectParams
 	notifyCb func(nl.Event)
 
-	netstack  *espradio.Stack
-	berkeley  xnet.StackBerkeley
-	stackloop sync.Once
+	netstack    *espradio.Stack
+	berkeley    xnet.StackBerkeley
+	stackloop   sync.Once
+	tcpPoolSize int
 
 	// ArenaPoolSize overrides the default arena pool size (bytes). Zero uses target default.
 	ArenaPoolSize int
+}
+
+// TCPPoolSize returns the maximum number of concurrent TCP connections
+// supported by the listener pool. Use this value with espradio.ThrottleHandler
+// to limit in-flight HTTP requests and prevent out-of-memory crashes.
+func (n *Esplink) TCPPoolSize() int {
+	return n.tcpPoolSize
 }
 
 func (n *Esplink) rstack() xnet.StackRetrying {
@@ -122,18 +130,19 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 	}
 	n.stackloop.Do(func() {
 		// Start stack goroutine once.
+		poolCfg := xnet.TCPPoolConfig{
+			PoolSize:           2,
+			QueueSize:          4,
+			TxBufSize:          4096,
+			RxBufSize:          1024,
+			EstablishedTimeout: 2 * time.Second,
+			ClosingTimeout:     2 * time.Second,
+			NewBackoff:         func() lneto.BackoffStrategy { return pollBackoff },
+		}
 		gostack := n.netstack.LnetoStack().StackGo(pollBackoff, xnet.StackGoConfig{
-			ListenerPoolConfig: xnet.TCPPoolConfig{
-				PoolSize:           2,
-				QueueSize:          4,
-				TxBufSize:          4096,
-				RxBufSize:          1024,
-				EstablishedTimeout: 2 * time.Second,
-				ClosingTimeout:     2 * time.Second,
-				NewBackoff:         func() lneto.BackoffStrategy { return pollBackoff },
-			},
+			ListenerPoolConfig: poolCfg,
 		})
-
+		n.tcpPoolSize = int(poolCfg.PoolSize)
 		n.berkeley = *xnet.NewBerkeleyStack(gostack.Socket)
 		go handleStack(espstack)
 	})
