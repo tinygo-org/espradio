@@ -19,5 +19,5 @@ var _ = pcap.Configure(machine.Serial, xnet.CapturePrinterConfig{
 })
 
 func printPacket(msg string, frame []byte) {
-	pcap.PrintPacket(msg, frame)
+	pcap.PrintEthernet(msg, frame)
 }
