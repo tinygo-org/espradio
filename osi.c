@@ -93,7 +93,6 @@ static bool espradio_env_is_chip(void) {
 void espradio_set_intr(int32_t cpu_no, uint32_t intr_source, uint32_t intr_num, int32_t intr_prio);
 void espradio_clear_intr(uint32_t intr_source, uint32_t intr_num);
 void espradio_set_isr(int32_t n, void *f, void *arg);
-void espradio_call_saved_isr(int32_t n);
 bool espradio_is_from_isr(void);
 void espradio_ints_on(uint32_t mask);
 void espradio_ints_off(uint32_t mask);
@@ -876,14 +875,6 @@ static void espradio_timer_setfn(void *ptimer, void *pfunction, void *parg) {
         timer_slots[i].deadline_us = 0;
     }
     // IDF-compatible behavior: timer_setfn only registers callback/arg.
-}
-
-int espradio_fire_one_pending_timer(void) {
-    return 0;
-}
-
-void espradio_fire_pending_timers(void) {
-    (void)0;
 }
 
 static void espradio_timer_disarm(void *timer) {

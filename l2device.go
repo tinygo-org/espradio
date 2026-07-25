@@ -4,8 +4,7 @@ import "net"
 
 const MaxFrameSize = 1518
 
-// EthernetDevice is WIP of how ethernet device
-// API design.
+// EthernetDevice defines the interface for an Ethernet-capable radio device.
 //
 // Device-specific initialization (WiFi join, PHY auto-negotiation,
 // firmware loading) must complete BEFORE the device is used as a stack endpoint.
@@ -50,6 +49,6 @@ type EthernetDevice interface {
 
 	// NetFlags offers ability to provide user with notice of the device state.
 	// May be also used to encode functioning such as if the device needs FCS/CRC encoding appended
-	// to the ethernet packet. WIP.
+	// to the ethernet packet.
 	NetFlags() net.Flags
 }

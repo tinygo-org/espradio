@@ -137,18 +137,7 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 		n.berkeley = *xnet.NewBerkeleyStack(gostack.Socket)
 		go handleStack(espstack)
 	})
-	err = n.doDHCP()
-	if err != nil {
-		if debug {
-			println("debug: doDHCP failed:", err.Error())
-		}
-		return err
-	}
-	return nil
-}
-
-func (n *Esplink) doDHCP() error {
-	_, err := n.netstack.SetupWithDHCP(espradio.DHCPConfig{})
+	_, err = n.netstack.SetupWithDHCP(espradio.DHCPConfig{})
 	if err != nil {
 		if debug {
 			println("DHCP failed:", err)

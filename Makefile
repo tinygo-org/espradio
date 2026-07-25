@@ -7,11 +7,9 @@ unit-test:
 	CGO_CFLAGS_ALLOW='$(CGO_CFLAGS_ALLOW_PATTERN)' tinygo test -target=esp32c3-qemu.json ./...
 
 update: update-esp-wifi
-	rm -rf blobs/headers
 	rm -rf blobs/include
 	rm -rf blobs/libs
 	mkdir -p blobs/libs
-	cp -rp esp-wifi/c/headers      blobs
 	cp -rp esp-wifi/c/include      blobs
 	cp -rp esp-wifi/esp-wifi-sys-esp32/libs  blobs/libs/esp32
 	cp -rp esp-wifi/esp-wifi-sys-esp32c3/libs blobs/libs/esp32c3

@@ -5,7 +5,6 @@ package espradio
 /*
 #cgo CFLAGS: -Iblobs/include
 #cgo CFLAGS: -Iblobs/include/local
-#cgo CFLAGS: -Iblobs/headers
 #cgo CFLAGS: -DCONFIG_SOC_WIFI_NAN_SUPPORT=0
 #cgo CFLAGS: -DESPRADIO_PHY_PATCH_ROMFUNCS=0
 #cgo CFLAGS: -fno-short-enums
@@ -259,21 +258,24 @@ func Start() error {
 	// etc.) that call ppCheckTxConnTrafficIdle.  Under cooperative scheduling
 	// the TX frame queues may be in an inconsistent state when those PM
 	// callbacks run, causing NULL-pointer crashes in ppCheckIsConnTraffic.
-	C.esp_wifi_set_ps(C.WIFI_PS_NONE)
+	//
+	// Pump the scheduler so ppTask processes the START command (pp_attach,
+	// ppInitTxq, etc.) and the critical ROM pointer variables (pTxRx,
+	// our_tx_eb, …) get initialised, then snapshot them.
+	postWiFiStart()
 
-	// The blob's esp_wifi_start posts a START command to ppTask's queue
-	// and returns.  espradio_esp_wifi_start already called post_start_cb
-	// which relocates heap tables.  Now pump the scheduler so ppTask
-	// processes START (calls pp_attach, ppInitTxq, etc.) and the critical
-	// ROM pointer variables (pTxRx, our_tx_eb, …) get initialised.
+	return nil
+}
+
+// postWiFiStart disables modem-sleep and pumps the scheduler so ppTask
+// processes the START command and ROM pointer variables get initialised.
+func postWiFiStart() {
+	C.esp_wifi_set_ps(C.WIFI_PS_NONE)
 	for i := 0; i < 40; i++ {
 		schedOnce()
 		runtime.Gosched()
 	}
-	// Snapshot the ROM pointers now that they are valid.
 	C.espradio_save_rom_ptrs()
-
-	return nil
 }
 
 // DebugISRCount returns the number of WiFi ISR invocations (for debugging).
@@ -439,16 +441,8 @@ func StartAP(cfg APConfig) error {
 		return makeError(code)
 	}
 
-	// Same post-start sequence as Start(): disable modem-sleep, pump the
-	// scheduler so ppTask processes the START command (pp_attach, ppInitTxq,
-	// etc.) and the critical ROM pointer variables get initialised, then
-	// snapshot them so espradio_restore_rom_ptrs can protect every TX.
-	C.esp_wifi_set_ps(C.WIFI_PS_NONE)
-	for i := 0; i < 40; i++ {
-		schedOnce()
-		runtime.Gosched()
-	}
-	C.espradio_save_rom_ptrs()
+	// Same post-start sequence as Start().
+	postWiFiStart()
 
 	return nil
 }
@@ -492,8 +486,6 @@ func espradio_log_timestamp() uint32 {
 
 //export espradio_run_task
 func espradio_run_task(task_func, param unsafe.Pointer)
-
-const taskStackSize = 8192
 
 //export espradio_task_create_pinned_to_core
 func espradio_task_create_pinned_to_core(task_func unsafe.Pointer, name *C.char, stack_depth uint32, param unsafe.Pointer, prio uint32, task_handle *unsafe.Pointer, core_id uint32) int32 {
@@ -592,24 +584,7 @@ func espradio_timer_arm_go(timer unsafe.Pointer, tmout_ticks uint32, repeat int3
 	if ms == 0 {
 		ms = 1
 	}
-	gen := timerArmGeneration(timer)
-	go func(gen uint32) {
-		d := time.Duration(ms) * time.Millisecond
-		if repeat != 0 {
-			for {
-				time.Sleep(d)
-				if !timerGenerationAlive(timer, gen) {
-					return
-				}
-				C.espradio_timer_fire(timer)
-			}
-		}
-		time.Sleep(d)
-		if !timerGenerationAlive(timer, gen) {
-			return
-		}
-		C.espradio_timer_fire(timer)
-	}(gen)
+	timerArm(timer, time.Duration(ms)*time.Millisecond, repeat)
 }
 
 //export espradio_timer_arm_go_us
@@ -617,9 +592,12 @@ func espradio_timer_arm_go_us(timer unsafe.Pointer, us uint32, repeat int32) {
 	if us == 0 {
 		us = 1
 	}
+	timerArm(timer, time.Duration(us)*time.Microsecond, repeat)
+}
+
+func timerArm(timer unsafe.Pointer, d time.Duration, repeat int32) {
 	gen := timerArmGeneration(timer)
 	go func(gen uint32) {
-		d := time.Duration(us) * time.Microsecond
 		if repeat != 0 {
 			for {
 				time.Sleep(d)
@@ -669,8 +647,6 @@ func espradio_wifi_int_restore(wifi_int_mux unsafe.Pointer, tmp uint32) {
 var wifiISR interrupt.Interrupt
 
 // ─── OSI sync primitives ───────────────────────────────────────────────────────
-
-const debugOSI = false
 
 var fakeSpinLock uint8
 
@@ -859,17 +835,6 @@ var (
 	threadSemIndex    uint32
 )
 
-func wifiThreadSemOwner(semphr unsafe.Pointer) unsafe.Pointer {
-	wifiThreadSemMu.Lock()
-	defer wifiThreadSemMu.Unlock()
-	for th, sem := range wifiThreadSemByTH {
-		if unsafe.Pointer(sem) == semphr {
-			return th
-		}
-	}
-	return nil
-}
-
 func semTryTake(sem *semaphore) bool {
 	for {
 		cur := atomic.LoadUint32(&sem.count)
@@ -895,8 +860,6 @@ func espradio_semphr_create(max, init uint32) unsafe.Pointer {
 //export espradio_semphr_take
 func espradio_semphr_take(semphr unsafe.Pointer, block_time_tick uint32) int32 {
 	sem := (*semaphore)(semphr)
-	owner := wifiThreadSemOwner(semphr)
-	_ = owner
 	if block_time_tick == 0 {
 		if semTryTake(sem) {
 			return 1

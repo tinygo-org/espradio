@@ -5,7 +5,6 @@ package esp32
 // #cgo CFLAGS: -I../blobs/include
 // #cgo CFLAGS: -I../blobs/include/esp32
 // #cgo CFLAGS: -I../blobs/include/local
-// #cgo CFLAGS: -I../blobs/headers
 // #cgo CFLAGS: -I..
 // #cgo CFLAGS: -DCONFIG_IDF_TARGET_ESP32=1
 // #cgo CFLAGS: -DCONFIG_SOC_WIFI_NAN_SUPPORT=0

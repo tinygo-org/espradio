@@ -6,7 +6,6 @@ package espradio
 #cgo CFLAGS: -Iblobs/include
 #cgo CFLAGS: -Iblobs/include/esp32
 #cgo CFLAGS: -Iblobs/include/local
-#cgo CFLAGS: -Iblobs/headers
 #cgo CFLAGS: -DCONFIG_IDF_TARGET_ESP32=1
 #cgo CFLAGS: -DCONFIG_SOC_WIFI_NAN_SUPPORT=0
 #cgo CFLAGS: -DESPRADIO_PHY_PATCH_ROMFUNCS=0

@@ -85,7 +85,7 @@ func main() {
 	espstack, err := espradio.NewStack(nd, espradio.StackConfig{
 		Hostname:     ssid,
 		MaxUDPPorts:  2,
-		MaxTCPPorts:  1,
+		MaxTCPPorts:  2,
 		PassivePeers: 255,
 	})
 	if err != nil {
