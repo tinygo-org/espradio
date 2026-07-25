@@ -32,27 +32,18 @@ extern void (*mesh_rxcb)(void);
 
 static void blob_cb_noop(void) { }
 
-/* pp_wdev_funcs relocation: the ROM ppTask dispatcher calls through a
- * heap-allocated function-pointer table (pp_wdev_funcs, 196 entries = 0x310
- * bytes).  DMA corruption can zero heap entries at runtime → pc:nil crash.
- * After esp_wifi_start() we copy the table into static .bss and redirect
- * the ROM pointer there, where DMA cannot reach. */
+/* DMA-corruption workaround tables: relocate heap-allocated function-pointer
+ * tables to static .bss where DMA cannot reach.  Only needed on ESP32-C3/S3;
+ * on the original ESP32 the blob manages these tables itself and the entry
+ * counts differ, so these are compiled out to save ~1.9 KB BSS. */
 #define PP_WDEV_FUNCS_ENTRIES  196
-static uint32_t s_pp_wdev_save[PP_WDEV_FUNCS_ENTRIES];
-
-/* net80211_funcs relocation: same DMA corruption issue as pp_wdev_funcs.
- * The blob allocates this table on the heap; we relocate to static .bss.
- * net80211_funcs_init writes ~44 entries; 128 provides safe headroom. */
 #define NET80211_FUNCS_MAX_ENTRIES  128
-static uint32_t s_net80211_funcs_save[NET80211_FUNCS_MAX_ENTRIES];
-
-/* g_phyFuns relocation: the PHY function table lives at a fixed DRAM address
- * (0x3fcef3d4, size 0x298 = 166 words) that can be corrupted at runtime —
- * entries are overwritten with arena allocation addresses, causing
- * InstructionFetchError when the PHY calibration timer reads temperature.
- * Relocate to static .bss after init and redirect g_phyFuns. */
 #define PHY_FUNCS_TABLE_WORDS  166
+#if !CONFIG_IDF_TARGET_ESP32
+static uint32_t s_pp_wdev_save[PP_WDEV_FUNCS_ENTRIES];
+static uint32_t s_net80211_funcs_save[NET80211_FUNCS_MAX_ENTRIES];
 static uint32_t s_phyFuns_save[PHY_FUNCS_TABLE_WORDS];
+#endif
 extern void *g_phyFuns;
 
 /* ppCheckTxConnTrafficIdle is called only by PM timer callbacks (pm_dream,
@@ -213,9 +204,11 @@ void espradio_restore_rom_ptrs(void) {
     if ((uint32_t)(uintptr_t)g_osi_funcs_p != s_saved_g_osi_funcs_p)
         g_osi_funcs_p = (wifi_osi_funcs_t *)(uintptr_t)s_saved_g_osi_funcs_p;
     /* esp_phy_enable resets g_phyFuns to the fixed DRAM address on every call.
-     * Redirect it back to our static copy. */
+     * Redirect it back to our static copy (C3/S3 only). */
+#if !CONFIG_IDF_TARGET_ESP32
     if (g_phyFuns != s_phyFuns_save && s_phyFuns_save[0] != 0)
         g_phyFuns = s_phyFuns_save;
+#endif
 }
 
 #define ESPRADIO_NETIF_RXRING_SIZE  6
@@ -226,7 +219,15 @@ typedef struct {
     uint16_t len;
 } espradio_rx_frame_t;
 
+/* On ESP32, place the RX ring in the dedicated DRAM1 region (SRAM1 pool 7/6)
+ * to free ~9.6 KB of SRAM2 for the Go GC heap.  The linker script's .rxring
+ * section sits before the arena in DRAM1.  On other targets the ring stays in
+ * normal .bss. */
+#if CONFIG_IDF_TARGET_ESP32
+static espradio_rx_frame_t s_rx_ring[ESPRADIO_NETIF_RXRING_SIZE] __attribute__((section(".rxring")));
+#else
 static espradio_rx_frame_t s_rx_ring[ESPRADIO_NETIF_RXRING_SIZE];
+#endif
 static volatile uint32_t   s_rx_head;
 static volatile uint32_t   s_rx_tail;
 static volatile uint32_t   s_rx_cb_count;

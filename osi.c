@@ -780,6 +780,13 @@ static int espradio_read_mac(uint8_t* mac, unsigned int type) {
     return rc;
 }
 
+/* On ESP32, place WiFi-only tables in DRAM1 (.wifibss) to free SRAM2. */
+#if CONFIG_IDF_TARGET_ESP32
+#define WIFIBSS __attribute__((section(".wifibss")))
+#else
+#define WIFIBSS
+#endif
+
 #define TIMER_SLOTS 32
 static struct {
     void *ptimer;
@@ -790,7 +797,7 @@ static struct {
     bool pending_setfn;
     uint64_t interval_us;
     uint64_t deadline_us;
-} timer_slots[TIMER_SLOTS];
+} timer_slots[TIMER_SLOTS] WIFIBSS;
 static unsigned timer_slots_used;
 
 void espradio_timer_fire(void *ptimer);

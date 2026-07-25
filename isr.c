@@ -76,8 +76,16 @@ void espradio_user_exception(uint32_t cause, uint32_t epc, uint32_t excvaddr, ui
 
 /* ---- ISR fn/arg storage ---- */
 
-static void (*s_isr_fn[32])(void *);
-static void *s_isr_arg[32];
+/* On ESP32, place WiFi-only tables in DRAM1 (.wifibss) to free SRAM2 for
+ * the Go GC heap.  On other targets they stay in normal .bss. */
+#if CONFIG_IDF_TARGET_ESP32
+#define WIFIBSS __attribute__((section(".wifibss")))
+#else
+#define WIFIBSS
+#endif
+
+static void (*s_isr_fn[32])(void *) WIFIBSS;
+static void *s_isr_arg[32] WIFIBSS;
 
 /* Bitmask of ISR slots registered via espradio_set_intr (WiFi sources only). */
 static uint32_t s_wifi_isr_slots;
@@ -140,8 +148,8 @@ void espradio_task_yield_from_isr(void) {
 static volatile uint32_t s_isr_ring_head;
 static volatile uint32_t s_isr_ring_tail;
 static volatile uint32_t s_isr_ring_drops;
-static void             *s_isr_ring_queue[ESPRADIO_ISR_RING_SIZE];
-static uint8_t           s_isr_ring_items[ESPRADIO_ISR_RING_SIZE][ESPRADIO_ISR_ITEM_SIZE];
+static void             *s_isr_ring_queue[ESPRADIO_ISR_RING_SIZE] WIFIBSS;
+static uint8_t           s_isr_ring_items[ESPRADIO_ISR_RING_SIZE][ESPRADIO_ISR_ITEM_SIZE] WIFIBSS;
 
 int32_t espradio_queue_send_from_isr(void *queue, void *item, void *hptw) {
     if (hptw) {
