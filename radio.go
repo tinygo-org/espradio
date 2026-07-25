@@ -470,10 +470,6 @@ func millisecondsToTicks(ms uint32) uint32 {
 	return ms * (ticksPerSecond / 1000)
 }
 
-func ticksToMilliseconds(ticks uint32) uint32 {
-	return ticks / (ticksPerSecond / 1000)
-}
-
 //export espradio_panic
 func espradio_panic(msg *C.char) {
 	panic("espradio: " + C.GoString(msg))
@@ -538,81 +534,6 @@ func espradio_time_us_now() uint64 {
 // timeUsNow returns monotonic microseconds without allocating a time.Time.
 func timeUsNow() uint64 {
 	return uint64(time.Now().UnixMicro())
-}
-
-var (
-	timerGenMu sync.Mutex
-	timerGen   map[uintptr]uint32
-)
-
-func timerArmGeneration(timer unsafe.Pointer) uint32 {
-	key := uintptr(timer)
-	timerGenMu.Lock()
-	defer timerGenMu.Unlock()
-	if timerGen == nil {
-		timerGen = make(map[uintptr]uint32)
-	}
-	g := timerGen[key] + 1
-	timerGen[key] = g
-	return g
-}
-
-func timerGenerationAlive(timer unsafe.Pointer, gen uint32) bool {
-	key := uintptr(timer)
-	timerGenMu.Lock()
-	defer timerGenMu.Unlock()
-	if timerGen == nil {
-		return false
-	}
-	return timerGen[key] == gen
-}
-
-//export espradio_timer_cancel_go
-func espradio_timer_cancel_go(timer unsafe.Pointer) {
-	key := uintptr(timer)
-	timerGenMu.Lock()
-	if timerGen == nil {
-		timerGen = make(map[uintptr]uint32)
-	}
-	timerGen[key] = timerGen[key] + 1
-	timerGenMu.Unlock()
-}
-
-//export espradio_timer_arm_go
-func espradio_timer_arm_go(timer unsafe.Pointer, tmout_ticks uint32, repeat int32) {
-	ms := ticksToMilliseconds(tmout_ticks)
-	if ms == 0 {
-		ms = 1
-	}
-	timerArm(timer, time.Duration(ms)*time.Millisecond, repeat)
-}
-
-//export espradio_timer_arm_go_us
-func espradio_timer_arm_go_us(timer unsafe.Pointer, us uint32, repeat int32) {
-	if us == 0 {
-		us = 1
-	}
-	timerArm(timer, time.Duration(us)*time.Microsecond, repeat)
-}
-
-func timerArm(timer unsafe.Pointer, d time.Duration, repeat int32) {
-	gen := timerArmGeneration(timer)
-	go func(gen uint32) {
-		if repeat != 0 {
-			for {
-				time.Sleep(d)
-				if !timerGenerationAlive(timer, gen) {
-					return
-				}
-				C.espradio_timer_fire(timer)
-			}
-		}
-		time.Sleep(d)
-		if !timerGenerationAlive(timer, gen) {
-			return
-		}
-		C.espradio_timer_fire(timer)
-	}(gen)
 }
 
 //export espradio_task_delay
