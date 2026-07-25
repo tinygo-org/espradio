@@ -102,11 +102,12 @@ func (n *Esplink) NetConnectAP(params APConnectParams) error {
 		udpPorts = 1 // reserve one slot for the DHCP server
 	}
 	espstack, err := espradio.NewStack(nd, espradio.StackConfig{
-		Hostname:      params.Hostname,
-		StaticAddress: params.StaticAddr,
-		MaxUDPPorts:   udpPorts,
-		MaxTCPPorts:   params.MaxTCPPorts,
-		PassivePeers:  params.PassivePeers,
+		Hostname:         params.Hostname,
+		StaticAddress:    params.StaticAddr,
+		MaxUDPPorts:      udpPorts,
+		MaxTCPPorts:      params.MaxTCPPorts,
+		PassivePeers:     params.PassivePeers,
+		AcceptBroadcast4: true,
 	})
 	if err != nil {
 		if debug {

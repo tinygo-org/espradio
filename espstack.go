@@ -36,6 +36,9 @@ type StackConfig struct {
 	MaxTCPPorts   int
 	MaxUDPPorts   int
 	PassivePeers  int
+	// AcceptBroadcast4 enables reception of IPv4 broadcast packets.
+	// Must be true when running a DHCP server (AP mode).
+	AcceptBroadcast4 bool
 }
 
 // DHCPConfig configures DHCP address acquisition.
@@ -57,15 +60,16 @@ func NewStack(dev *NetDev, cfg StackConfig) (*Stack, error) {
 	stack := &Stack{dev: dev}
 	const MTU = MaxFrameSize - ethernet.MaxOverheadSize + 4 // CRC not included:+4
 	xcfg := xnet.StackConfig{
-		DNSServer:         cfg.DNSServer,
-		NTPServer:         cfg.NTPServer,
-		Hostname:          cfg.Hostname,
-		MaxActiveTCPPorts: uint16(cfg.MaxTCPPorts),
-		MaxActiveUDPPorts: uint16(cfg.MaxUDPPorts),
-		RandSeed:          time.Now().UnixNano() ^ cfg.RandSeed,
-		HardwareAddress:   mac,
-		MTU:               MTU,
-		PassivePeers:      cfg.PassivePeers,
+		DNSServer:           cfg.DNSServer,
+		NTPServer:           cfg.NTPServer,
+		Hostname:            cfg.Hostname,
+		MaxActiveTCPPorts:   uint16(cfg.MaxTCPPorts),
+		MaxActiveUDPPorts:   uint16(cfg.MaxUDPPorts),
+		RandSeed:            time.Now().UnixNano() ^ cfg.RandSeed,
+		HardwareAddress:     mac,
+		MTU:                 MTU,
+		PassivePeers:        cfg.PassivePeers,
+		AcceptIPv4Broadcast: cfg.AcceptBroadcast4,
 	}
 	if cfg.StaticAddress.IsValid() && cfg.StaticAddress.Is4() {
 		xcfg.StaticAddress4 = cfg.StaticAddress.As4()

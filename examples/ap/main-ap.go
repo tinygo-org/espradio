@@ -50,9 +50,10 @@ func main() {
 
 	println("ap: creating lneto stack...")
 	stack, err := espradio.NewStack(nd, espradio.StackConfig{
-		Hostname:      ssid,
-		StaticAddress: addr,
-		MaxUDPPorts:   2,
+		Hostname:         ssid,
+		StaticAddress:    addr,
+		MaxUDPPorts:      2,
+		AcceptBroadcast4: true,
 	})
 	if err != nil {
 		failure("ap: stack err: " + err.Error())
