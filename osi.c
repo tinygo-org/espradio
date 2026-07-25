@@ -780,7 +780,7 @@ static int espradio_read_mac(uint8_t* mac, unsigned int type) {
     return rc;
 }
 
-#define TIMER_SLOTS 64
+#define TIMER_SLOTS 32
 static struct {
     void *ptimer;
     void (*fn)(void *);

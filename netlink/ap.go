@@ -49,7 +49,7 @@ func (params APConnectParams) withDefaults() APConnectParams {
 		}
 	}
 	if params.PassivePeers == 0 {
-		params.PassivePeers = 255
+		params.PassivePeers = 64
 	}
 	return params
 }

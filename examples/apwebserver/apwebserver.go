@@ -51,7 +51,7 @@ func main() {
 		EnableDHCPServer: true,
 		MaxUDPPorts:      2,
 		MaxTCPPorts:      4,
-		PassivePeers:     255,
+		PassivePeers:     64,
 	})
 	if err != nil {
 		failure("could not start AP: " + err.Error())

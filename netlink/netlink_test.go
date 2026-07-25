@@ -62,8 +62,8 @@ func TestAPParamsWithDefaultsEmpty(t *testing.T) {
 	if got.Hostname != defaultHostname {
 		t.Errorf("Hostname = %q; want %q", got.Hostname, defaultHostname)
 	}
-	if got.PassivePeers != 255 {
-		t.Errorf("PassivePeers = %d; want 255", got.PassivePeers)
+	if got.PassivePeers != 64 {
+		t.Errorf("PassivePeers = %d; want 64", got.PassivePeers)
 	}
 }
 

@@ -102,7 +102,7 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 		Hostname:     params.Hostname,
 		MaxUDPPorts:  2,
 		MaxTCPPorts:  1,
-		PassivePeers: 255,
+		PassivePeers: 64,
 	})
 	if err != nil {
 		if debug {

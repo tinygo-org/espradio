@@ -79,7 +79,7 @@ func main() {
 		Hostname:     ssid,
 		MaxUDPPorts:  2,
 		MaxTCPPorts:  1,
-		PassivePeers: 255,
+		PassivePeers: 64,
 	})
 	if err != nil {
 		failure("stack failed: " + err.Error())
