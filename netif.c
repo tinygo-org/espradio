@@ -218,7 +218,7 @@ void espradio_restore_rom_ptrs(void) {
         g_phyFuns = s_phyFuns_save;
 }
 
-#define ESPRADIO_NETIF_RXRING_SIZE  8
+#define ESPRADIO_NETIF_RXRING_SIZE  6
 #define ESPRADIO_NETIF_FRAME_MAX   1600
 
 typedef struct {
