@@ -450,6 +450,28 @@ static volatile int s_vhci_send_available = 1;
 
 /* Called by ROM controller when it has HCI data for the host. */
 static int vhci_host_recv_cb(uint8_t *data, uint16_t len) {
+    /* Duplicate-delivery detector.
+     *
+     * A stale ACL packet being replayed is what breaks GATT: the host reads the
+     * previous ReadByGroupResponse as if it were the reply to its new
+     * ReadByTypeReq. This checks whether the duplication originates here (the
+     * controller handing us the same buffer twice) or above us in the host
+     * stack's framing. Compare-only, and print just on a hit, so normal timing
+     * is unaffected -- full BLE_DBG tracing perturbs the link enough to change
+     * the failure. */
+    {
+        static uint8_t  s_prev[64];
+        static uint16_t s_prev_len;
+        static uint32_t s_dupes;
+        uint16_t n = len < sizeof(s_prev) ? len : sizeof(s_prev);
+        if (s_prev_len == len && memcmp(s_prev, data, n) == 0) {
+            BLE_DBG("VHCI_DUP #%lu type=0x%02x len=%u\n",
+                   (unsigned long)++s_dupes, len ? data[0] : 0, (unsigned)len);
+        }
+        memcpy(s_prev, data, n);
+        s_prev_len = len;
+    }
+
     /* Decode HCI event for debug */
     if (len >= 4 && data[0] == 0x04 && data[1] == 0x0E) {
         /* Command Complete: data[3]=num_cmds, data[4:5]=opcode, data[6]=status */
@@ -857,6 +879,13 @@ void espradio_bt_sched_tick(void) {
     /* The ke message pump has to run from somewhere: the blob's controller task
      * goroutine does not spin its own loop here, so nothing else dequeues ke
      * messages and HCI commands would never be executed at all. */
+    /* Split deliberately. The controller task's rw_schedule() already calls
+     * modules_funcs[0x284] (the ke event scheduler) BEFORE taking its
+     * g_waking_sleeping_sem guard, so running ke_event_schedule from here too
+     * dispatches the same event in two contexts -- which duplicates one HCI
+     * packet to the host and desynchronises the whole ATT request/response
+     * stream by one. ke_task_schedule (message dispatch) is the half the task
+     * does not appear to drive. */
     if (s_sched_tick_mask & BT_TICK_KE_PUMP) {
         r_ke_event_schedule();
     }
