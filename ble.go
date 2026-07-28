@@ -105,7 +105,6 @@ func BLEInit() error {
 	// Enable hardware interrupts for BT
 	C.espradio_bt_enable_hw_interrupts()
 
-
 	// Give the controller task time to stabilize
 	time.Sleep(100 * time.Millisecond)
 
