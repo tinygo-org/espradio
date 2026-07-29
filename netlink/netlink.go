@@ -313,7 +313,7 @@ func handleStack(stack *espradio.Stack) {
 			// the frame before the send was attempted, so there is nothing left to
 			// retry with.  The retry that can still help runs inside
 			// espradio_netif_tx, against the blob's TX-done signal.  With debug
-			// off, DebugStats is the record: TxFailNoMem, TxFailOther,
+			// off, ReadStats is the record: TxFailNoMem, TxFailOther,
 			// TxNotConnected.
 			println("handleStack: RecvAndSend:", err.Error())
 		}

@@ -42,7 +42,9 @@ func main() {
 
 		// Driver counters.  Most of these count something being dropped, so a
 		// non-zero value is the only evidence it happened.
-		espradio.DebugStats().Print()
+		var stats espradio.Stats
+		espradio.ReadStats(&stats)
+		stats.Print()
 		println()
 
 		time.Sleep(10 * time.Second)

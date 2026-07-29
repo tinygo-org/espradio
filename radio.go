@@ -118,14 +118,15 @@ var wifiInitDone uint32
 
 // ─── Scheduler policy (runtime-switchable, for A/B on hardware) ──────────────
 
-// SchedPolicy selects behaviour inside schedOnce that is worth measuring on
+// schedPolicyMask selects behaviour inside schedOnce that is worth measuring on
 // real hardware rather than reasoning about.  Modelled on the BLE side's
 // espradio_bt_set_sched_tick_mask, which is what made the scheduler-contention
-// theory in the BLE work falsifiable.
-type SchedPolicy uint32
+// theory in the BLE work falsifiable.  Not exported: like its BLE counterpart,
+// this is a bisecting knob for this package's own bring-up, not public API.
+type schedPolicyMask uint32
 
 const (
-	// SchedPollWiFiISR polls the blob's WiFi ISR from the scheduler tick.
+	// schedPollWiFiISR polls the blob's WiFi ISR from the scheduler tick.
 	//
 	// On ESP32-S3 and ESP32 this is required: their hardware handler only
 	// masks and kicks, so the tick is the only thing that runs the blob ISR.
@@ -135,21 +136,21 @@ const (
 	// (see the note in schedOnce), and whether the WiFi blob tolerates it is a
 	// property of that blob, not a general rule -- so it is switchable and
 	// meant to be measured, not removed on argument.
-	SchedPollWiFiISR SchedPolicy = 1 << iota
+	schedPollWiFiISR schedPolicyMask = 1 << iota
 )
 
 // schedPolicy defaults to polling the WiFi ISR with fixed-count drains, which is
 // the behaviour that predates this switch.
-var schedPolicy = uint32(SchedPollWiFiISR)
+var schedPolicy = uint32(schedPollWiFiISR)
 
-// SetSchedPolicy replaces the scheduler policy mask.  Intended for bisecting
+// setSchedPolicy replaces the scheduler policy mask.  Intended for bisecting
 // behaviour on hardware; the default is the historical behaviour.
-func SetSchedPolicy(p SchedPolicy) { atomic.StoreUint32(&schedPolicy, uint32(p)) }
+func setSchedPolicy(p schedPolicyMask) { atomic.StoreUint32(&schedPolicy, uint32(p)) }
 
-// GetSchedPolicy returns the current scheduler policy mask.
-func GetSchedPolicy() SchedPolicy { return SchedPolicy(atomic.LoadUint32(&schedPolicy)) }
+// getSchedPolicy returns the current scheduler policy mask.
+func getSchedPolicy() schedPolicyMask { return schedPolicyMask(atomic.LoadUint32(&schedPolicy)) }
 
-func schedPolicyHas(p SchedPolicy) bool {
+func schedPolicyHas(p schedPolicyMask) bool {
 	return atomic.LoadUint32(&schedPolicy)&uint32(p) != 0
 }
 
@@ -222,7 +223,7 @@ var (
 	// 5 ms / 200 Hz, but every espradio_task_yield_go calls kickSched, so the
 	// ticker is woken far more often than that -- the ISR counter's growth implies
 	// tens of thousands of passes per second.  This measures it directly instead
-	// of inferring it: DebugStats divides by elapsed time.
+	// of inferring it: ReadStats divides by elapsed time.
 	//
 	// The same feedback loop was found and throttled on the BLE side, where waking
 	// the controller task fed back into kickSched and collapsed the 5 ms tick to
@@ -267,7 +268,7 @@ func schedOnce() bool {
 
 	// Poll WiFi ISR: work around missing hardware interrupt on ESP32-S3.
 	// Only poll after init is complete (blob ISR not registered until then).
-	if atomic.LoadUint32(&wifiInitDone) != 0 && schedPolicyHas(SchedPollWiFiISR) {
+	if atomic.LoadUint32(&wifiInitDone) != 0 && schedPolicyHas(schedPollWiFiISR) {
 		C.espradio_call_wifi_isr()
 	}
 
@@ -430,15 +431,16 @@ var (
 // countHWWiFiISR is called from each target's WiFi interrupt handler.
 func countHWWiFiISR() { atomic.AddUint32(&hwWiFiISRCount, 1) }
 
-// SetKickThrottleUs sets the minimum interval in microseconds between
+// setKickThrottleUs sets the minimum interval in microseconds between
 // yield-driven scheduler wakes.  Zero disables the throttle.
 //
 // Intended for bisecting on hardware: 0 is the historical behaviour, 1000 the
-// default, and larger values trade latency for fewer scheduler passes.
-func SetKickThrottleUs(us uint32) { atomic.StoreUint32(&kickThrottleUs, us) }
+// default, and larger values trade latency for fewer scheduler passes.  Not
+// exported: a bisecting knob for this package's own bring-up, not public API.
+func setKickThrottleUs(us uint32) { atomic.StoreUint32(&kickThrottleUs, us) }
 
-// KickThrottleUs returns the current yield-driven kick interval.
-func KickThrottleUs() uint32 { return atomic.LoadUint32(&kickThrottleUs) }
+// getKickThrottleUs returns the current yield-driven kick interval.
+func getKickThrottleUs() uint32 { return atomic.LoadUint32(&kickThrottleUs) }
 
 // Note on bring-up and the throttle: disabling the throttle for the duration of
 // the bring-up pumps was tried, on the theory that rate-limiting the blob's wakes
@@ -767,10 +769,8 @@ func (s Stats) Print() {
 		"used", s.ArenaUsed, "of", s.ArenaCapacity)
 }
 
-// DebugStats returns a snapshot of the driver's internal counters.
-func DebugStats() Stats {
-	var s Stats
-
+// ReadStats fills s with a snapshot of the driver's internal counters.
+func ReadStats(s *Stats) {
 	s.WiFiISRCount = uint32(C.espradio_get_wifi_isr_count())
 	s.SchedReentries = atomic.LoadUint32(&schedReentries)
 	s.EventCapHits = atomic.LoadUint32(&schedEventCapHits)
@@ -828,8 +828,6 @@ func DebugStats() Stats {
 	s.AllocCount = uint32(allocs)
 	s.FreeCount = uint32(frees)
 	s.ArenaUsed, s.ArenaCapacity = ArenaStats()
-
-	return s
 }
 
 // Scan tuning.  All three were unnamed literals; none has a recorded derivation.
@@ -1173,7 +1171,7 @@ func espradio_task_ms_to_tick(ms uint32) int32 {
 //
 // Nesting is tracked inside the primitive, following bt_interrupt_disable: the
 // previous interrupt state is captured only at depth 0, and only the outermost
-// restore re-enables.  That makes the depth trustworthy -- DebugStats reports it,
+// restore re-enables.  That makes the depth trustworthy -- ReadStats reports it,
 // and a non-zero value while the radio is idle means a critical section leaked --
 // and makes the pair robust against the blob handing back a stale saved state.
 var (

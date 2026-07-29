@@ -58,7 +58,9 @@ func main() {
 	go func() {
 		for {
 			time.Sleep(10 * time.Second)
-			espradio.DebugStats().Print()
+			var stats espradio.Stats
+			espradio.ReadStats(&stats)
+			stats.Print()
 		}
 	}()
 

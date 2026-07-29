@@ -70,7 +70,7 @@ func (nd *NetDev) EthPoll(buf []byte) (int, error) {
 	if n == 0 {
 		// Either the ring was empty, or the frame did not fit and was dropped
 		// whole rather than truncated.  Both mean "no frame for this caller";
-		// the drop is counted in DebugStats as RxOversize.
+		// the drop is counted in ReadStats as RxOversize.
 		return 0, nil
 	}
 	if nd.rxHandler != nil {
@@ -81,7 +81,7 @@ func (nd *NetDev) EthPoll(buf []byte) (int, error) {
 		// call where it successfully delivered a frame.
 		//
 		// The original defect was that these were invisible, not that they were
-		// unpropagated; DebugStats().RxIngressErrors fixes that without giving
+		// unpropagated; ReadStats().RxIngressErrors fixes that without giving
 		// normal traffic an error path.
 		if err := nd.rxHandler(buf[:n]); err != nil {
 			atomic.AddUint32(&rxIngressErrors, 1)
