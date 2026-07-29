@@ -141,3 +141,33 @@ void espradio_wifi_unmask(void) {
     }
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+ * BLE Interrupt Wiring
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/* CPU interrupt numbers for BT — must match ble.go constants */
+#define BT_CPU_INT_5  28u  /* RWBT + BT_BB sources */
+#define BT_CPU_INT_8  30u  /* RWBLE source */
+
+/* Called from Go after BLE init to wire BT peripheral sources to CPU
+ * interrupts and enable them with level-triggered mode, priority > threshold(5). */
+void espradio_bt_enable_hw_interrupts(void) {
+    /* Route BT peripheral sources via interrupt matrix */
+    intr_matrix_set(0, ETS_BT_BB_INTR_SOURCE, BT_CPU_INT_5);
+    intr_matrix_set(0, ETS_RWBT_INTR_SOURCE,  BT_CPU_INT_5);
+    intr_matrix_set(0, ETS_RWBLE_INTR_SOURCE, BT_CPU_INT_8);
+
+    /* Level-triggered: BLE peripheral holds the line asserted until the ISR
+     * clears the status. Level mode auto re-fires if still asserted after
+     * handler returns — no missed events. Clear TYPE bits = level. */
+    ESPRADIO_INTC_TYPE_REG &= ~((1u << BT_CPU_INT_5) | (1u << BT_CPU_INT_8));
+
+    /* Set priority > CPU_INT_THRESH (5) so interrupts actually fire */
+    ESPRADIO_INTC_PRI_REG(BT_CPU_INT_5) = 7u;
+    ESPRADIO_INTC_PRI_REG(BT_CPU_INT_8) = 7u;
+
+    /* Enable the CPU interrupts */
+    ESPRADIO_INTC_ENABLE_REG |= (1u << BT_CPU_INT_5) | (1u << BT_CPU_INT_8);
+
+    __asm__ volatile ("fence" ::: "memory");
+}

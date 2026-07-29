@@ -8,7 +8,14 @@
 #include "esp_phy.h"
 
 /* no debug logging in this adapter */
+#ifndef ESPRADIO_PHY_DEBUG
+#define ESPRADIO_PHY_DEBUG 0
+#endif
+#if ESPRADIO_PHY_DEBUG
+#define PHY_ADAPTER_DBG(...) printf(__VA_ARGS__)
+#else
 #define PHY_ADAPTER_DBG(...) ((void)0)
+#endif
 
 extern void phy_wifi_enable_set(uint8_t enable);
 extern void *g_phyFuns;
@@ -141,17 +148,34 @@ void esp_phy_load_cal_and_init(void) {
     phy_bbpll_en_usb(bbpll_usb);
     PHY_ADAPTER_DBG("espradio: phy_bbpll_en_usb=%u reset_reason=%d\n",
                     (unsigned)(bbpll_usb ? 1u : 0u), rr);
-    bool force_cal_none = (rr == 21);
-    esp_phy_calibration_mode_t cal_mode = force_cal_none
-                                              ? PHY_RF_CAL_NONE
-                                              : (esp_phy_calibration_mode_t)(rr == 5 ? PHY_RF_CAL_NONE : PHY_RF_CAL_FULL);
+    /* Calibration mode, matching ESP-IDF esp_phy_load_cal_and_init():
+     *   - start from PHY_RF_CAL_PARTIAL (the CONFIG_ESP_PHY_CALIBRATION_MODE default),
+     *   - PHY_RF_CAL_NONE *only* when resuming from deep sleep, where the stored
+     *     calibration is still valid,
+     *   - PHY_RF_CAL_FULL whenever stored calibration data is unavailable.
+     *
+     * Note the enum is PARTIAL=0, NONE=1, FULL=2 — "NONE" is not the zero value.
+     *
+     * This previously forced PHY_RF_CAL_NONE on reset reason 21 and suppressed the
+     * NVS-miss fallback to FULL. Reason 21 is RESET_REASON_CORE_USB_UART, i.e. the
+     * USB-Serial-JTAG reset that `tinygo flash` and any serial-monitor attach
+     * produce — so in normal development the PHY came up with *no* RF calibration
+     * at all and no stored data to substitute. The BT RF then has nothing to
+     * calibrate against, which is why r_cali_phase_match_p could never lock
+     * (BLE +0xf8 bit 12) and the receiver never completed an event. */
+    esp_phy_calibration_mode_t cal_mode = PHY_RF_CAL_PARTIAL;
+    if (rr == 5 /* RESET_REASON_CORE_DEEP_SLEEP */) {
+        cal_mode = PHY_RF_CAL_NONE;
+    }
 
     esp_err_t nvs_rc = esp_phy_load_cal_data_from_nvs(cal_data);
-    if (nvs_rc != ESP_OK && !force_cal_none) {
+    if (nvs_rc != ESP_OK) {
         cal_mode = PHY_RF_CAL_FULL;
     }
     (void)espradio_hal_read_mac_go((unsigned char *)cal_data->mac, 0);
     int rc = register_chipv7_phy(init_data, cal_data, cal_mode);
+    PHY_ADAPTER_DBG("espradio: register_chipv7_phy(cal_mode=%d) -> %d (nvs_rc=%d)\n",
+                    (int)cal_mode, rc, (int)nvs_rc);
     if (cal_mode != PHY_RF_CAL_NONE && (nvs_rc != ESP_OK || rc == 1)) {
         esp_phy_store_cal_data_to_nvs(cal_data);
     }

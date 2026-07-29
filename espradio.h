@@ -104,3 +104,15 @@ void ets_install_uart_printf(void);
 void ets_install_lock(void (*lock)(void), void (*unlock)(void));
 void ets_intr_lock(void);
 void ets_intr_unlock(void);
+
+/* ===== BLE (bt_ble.c) ===== */
+int  espradio_ble_init(void);
+int  espradio_vhci_buffered(void);
+int  espradio_vhci_read_byte(void);
+int  espradio_vhci_read(uint8_t *buf, int max_len);
+int  espradio_vhci_write(const uint8_t *data, int len);
+void espradio_bt_isr_dispatch_5(void);
+void espradio_bt_isr_dispatch_8(void);
+void espradio_bt_enable_hw_interrupts(void);
+void espradio_call_bt_isr(void);
+void espradio_bt_sched_tick(void);

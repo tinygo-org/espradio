@@ -316,9 +316,15 @@ int32_t espradio_queue_recv(void *queue, void *item, uint32_t block_time_tick) {
     espradio_queue_t *q = queue_resolve(queue);
     if (!q || !item) return 0;
 
+    /* Cap "forever" timeout to 10ms so BLE controller task wakes periodically.
+     * Without this, the task blocks indefinitely on g_rw_schd_queue and never
+     * runs ke_task_schedule/btdm_rw_run to process scan scheduling. */
     uint64_t deadline = 0;
-    int forever = block_time_tick == OSI_FUNCS_TIME_BLOCKING;
-    if (!forever && block_time_tick != 0) {
+    int forever = 0;
+    if (block_time_tick == OSI_FUNCS_TIME_BLOCKING || block_time_tick > 10) {
+        block_time_tick = 10; /* cap to 10ms */
+    }
+    if (block_time_tick != 0) {
         deadline = espradio_time_us_now() + ((uint64_t)block_time_tick * 1000ULL);
     }
 
@@ -334,7 +340,10 @@ int32_t espradio_queue_recv(void *queue, void *item, uint32_t block_time_tick) {
         }
         queue_unlock(q);
 
-        if (block_time_tick == 0) return 0;
+        if (block_time_tick == 0) {
+            espradio_task_yield_go(); /* yield on failed non-blocking recv (prevents BT task starvation) */
+            return 0;
+        }
         if (!forever && espradio_time_us_now() >= deadline) return 0;
         espradio_task_yield_go();
     }
@@ -362,6 +371,18 @@ void *espradio_wifi_create_queue(int queue_len, int item_size) {
 
 void espradio_wifi_delete_queue(void *queue) {
     espradio_generic_queue_delete(queue);
+}
+
+/* ─── BLE-accessible queue wrappers (bt_ble.c uses these) ─── */
+void *espradio_queue_create_internal(uint32_t len, uint32_t item_size) {
+    return espradio_generic_queue_create(len, item_size);
+}
+void espradio_queue_delete_internal(void *queue) {
+    espradio_generic_queue_delete(queue);
+}
+int32_t espradio_queue_recv_from_isr(void *queue, void *item, void *hptw) {
+    (void)hptw;
+    return espradio_queue_recv(queue, item, 0);
 }
 
 /* Event group functions — implemented in Go (radio.go), declared here

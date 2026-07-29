@@ -8,7 +8,7 @@ package espradio
 #cgo CFLAGS: -Iblobs/include/local
 #cgo CFLAGS: -DCONFIG_SOC_WIFI_NAN_SUPPORT=0
 #cgo CFLAGS: -DESPRADIO_PHY_PATCH_ROMFUNCS=0
-#cgo LDFLAGS: -Lblobs/libs/esp32c3 -lcoexist -lcore -lmesh -lnet80211 -lespnow -lregulatory -lphy -lpp -lwpa_supplicant
+#cgo LDFLAGS: -Lblobs/libs/esp32c3 -lcoexist -lcore -lmesh -lnet80211 -lespnow -lregulatory -lphy -lpp -lwpa_supplicant -lbtbb -lbtdm_app
 
 #include "include.h"
 */
@@ -50,10 +50,20 @@ func initHardware() error {
 		SYSTEM_RW_BTMAC_REG_RST |
 		SYSTEM_BTBB_REG_RST
 
-	esp.RTC_CNTL.DIG_PWC.ClearBits(esp.RTC_CNTL_DIG_PWC_WIFI_FORCE_PD)
+	// Release both the WiFi *and* Bluetooth power domains from forced power-down
+	// and forced isolation. esp-hal's init_clocks() for the C3 clears
+	// wifi_force_iso + bt_force_iso and wifi_force_pd + bt_force_pd; only the
+	// WiFi bits were being cleared here, so RTC_CNTL could keep the BT domain
+	// isolated/powered down. The digital side still responds in that state
+	// (registers read/write, the BLE CLKN counter runs), which makes it look
+	// healthy while the RF never actually comes up.
+	esp.RTC_CNTL.DIG_PWC.ClearBits(esp.RTC_CNTL_DIG_PWC_WIFI_FORCE_PD |
+		esp.RTC_CNTL_DIG_PWC_BT_FORCE_PD)
 	esp.APB_CTRL.WIFI_RST_EN.SetBits(MODEM_RESET_FIELD_WHEN_PU)
 	esp.APB_CTRL.WIFI_RST_EN.ClearBits(MODEM_RESET_FIELD_WHEN_PU)
-	esp.RTC_CNTL.DIG_ISO.ClearBits(esp.RTC_CNTL_DIG_ISO_FORCE_OFF)
+	esp.RTC_CNTL.DIG_ISO.ClearBits(esp.RTC_CNTL_DIG_ISO_FORCE_OFF |
+		esp.RTC_CNTL_DIG_ISO_WIFI_FORCE_ISO |
+		esp.RTC_CNTL_DIG_ISO_BT_FORCE_ISO)
 
 	return nil
 }

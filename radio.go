@@ -138,6 +138,16 @@ func schedOnce() {
 		C.espradio_call_wifi_isr()
 	}
 
+	// NOTE: Do NOT poll BLE ISR here. Calling the blob's RWBLE ISR without
+	// a real hardware event corrupts the link-layer state machine (resets
+	// pwr_state, disrupts scan timing). BLE uses level-triggered interrupts
+	// that re-fire automatically when the peripheral asserts.
+
+	// Call r_rwip_schedule to drive the BLE link-layer scheduler.
+	// This programs COMPVAL for the next scan window timer event.
+	// Unlike calling the ISR, this is safe from non-ISR context.
+	C.espradio_bt_sched_tick()
+
 	for C.espradio_isr_ring_tail() != C.espradio_isr_ring_head() {
 		idx := C.espradio_isr_ring_tail()
 		q := C.espradio_isr_ring_entry_queue(idx)
@@ -782,9 +792,25 @@ func espradio_semphr_create(max, init uint32) unsafe.Pointer {
 func espradio_semphr_take(semphr unsafe.Pointer, block_time_tick uint32) int32 {
 	sem := (*semaphore)(semphr)
 	if block_time_tick == 0 {
+		// A zero-timeout take must be genuinely non-blocking: no yield.
+		//
+		// The blob uses these as mutual-exclusion guards, not as scheduling
+		// points. rw_schedule() in particular does a non-blocking take of
+		// g_waking_sleeping_sem to guard its critical section. Yielding on the
+		// failure path let the other context (the 5ms tick and the BT
+		// controller task both reach rw_schedule) re-enter the scheduler, which
+		// ran it twice and delivered the same ACL packet to the host twice --
+		// breaking GATT, because the duplicate ATT response is consumed as the
+		// reply to the next request.
 		if semTryTake(sem) {
 			return 1
 		}
+		// Yield on the failure path. The BT controller task needs CPU to service
+		// connection events on time; without this the link drops with
+		// "Connection Failed to be Established" (0x3e) right after the first ATT
+		// request. The ke-event re-entrancy this used to allow is now blocked by
+		// the guard on modules_funcs[0x284] instead.
+		safeGosched()
 		return 0
 	}
 
