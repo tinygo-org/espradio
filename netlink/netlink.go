@@ -307,7 +307,16 @@ func (n *Esplink) SetSockOpt(sockfd int, level int, opt int, value interface{}) 
 
 func handleStack(stack *espradio.Stack) {
 	for {
-		send, recv, _ := stack.RecvAndSend()
+		send, recv, err := stack.RecvAndSend()
+		if err != nil && debug {
+			// A TX failure here is already unrecoverable: EgressEthernet dequeued
+			// the frame before the send was attempted, so there is nothing left to
+			// retry with.  The retry that can still help runs inside
+			// espradio_netif_tx, against the blob's TX-done signal.  With debug
+			// off, DebugStats is the record: TxFailNoMem, TxFailOther,
+			// TxNotConnected.
+			println("handleStack: RecvAndSend:", err.Error())
+		}
 		if send == 0 && recv == 0 {
 			time.Sleep(pollTime)
 		}

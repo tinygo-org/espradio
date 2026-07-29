@@ -13,6 +13,7 @@ import (
 
 	"tinygo.org/x/drivers/netdev"
 	nl "tinygo.org/x/drivers/netlink"
+	"tinygo.org/x/espradio"
 	link "tinygo.org/x/espradio/netlink"
 )
 
@@ -50,6 +51,16 @@ func main() {
 	http.Handle("/6", logRequest(sixlines))
 	http.Handle("/off", logRequest(LED_OFF))
 	http.Handle("/on", logRequest(LED_ON))
+
+	// Driver counters, printed while traffic is flowing.  Most of these count
+	// something being dropped, so a non-zero value is the only evidence it
+	// happened.
+	go func() {
+		for {
+			time.Sleep(10 * time.Second)
+			espradio.DebugStats().Print()
+		}
+	}()
 
 	h, _ := link.Addr()
 	host := h.String()

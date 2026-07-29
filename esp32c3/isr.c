@@ -105,6 +105,18 @@ void espradio_snapshot_intenable(void) {
     s_intenable_snapshot = ESPRADIO_INTC_ENABLE_REG;
 }
 
+/* No unmask rate limit needed here, but the accessors must exist because the
+ * shared Go side reports them for every target.
+ *
+ * The C3 does not have the interrupt storm the Xtensa targets do: its handler runs
+ * the blob ISR inline in interrupt context, which acks the MAC before returning, so
+ * the line is not still asserted when the pass unmasks it.  Measured, this target
+ * takes single-digit hardware interrupts per second where the S3 takes 45,000.
+ * Rate-limiting the unmask here would only add latency for nothing. */
+void espradio_set_unmask_interval_us(uint32_t us) { (void)us; }
+uint32_t espradio_unmask_interval_us(void)        { return 0; }
+uint32_t espradio_unmask_suppressed(void)         { return 0; }
+
 /* No-op on RISC-V: PS.INTLEVEL does not exist. */
 void espradio_lower_intlevel(void) {
 }

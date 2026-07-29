@@ -109,12 +109,45 @@ void espradio_wifi_isr_post_mask(void) {
     espradio_ints_off(1u << ESPRADIO_WIFI_CPU_INT);
 }
 
+/* Rate limit on re-enabling the WiFi CPU interrupt -- see the long note in
+ * esp32s3/isr.c.  Same closed loop here, measured at 27,183 interrupts and one
+ * scheduler pass each per second on an idle radio, and safe to limit for the same
+ * reason: this handler only masks and wakes the scheduler, and schedOnce() calls
+ * espradio_call_wifi_isr() itself on every pass, so the MAC is serviced whether or
+ * not the interrupt fired.
+ *
+ * Zero disables the limit, for A/B on hardware. */
+static volatile uint32_t s_unmask_interval_us = 1000;
+static uint64_t          s_last_unmask_us;
+static volatile uint32_t s_unmask_suppressed;
+
+void espradio_set_unmask_interval_us(uint32_t us) { s_unmask_interval_us = us; }
+uint32_t espradio_unmask_interval_us(void)        { return s_unmask_interval_us; }
+uint32_t espradio_unmask_suppressed(void)         { return s_unmask_suppressed; }
+
 void espradio_wifi_unmask(void) {
     /* Restore any TinyGo-owned INTENABLE bits that blob code may have cleared
      * (e.g. via ROM ets_isr_mask), then ensure the WiFi CPU interrupt is on. */
+    uint32_t interval = s_unmask_interval_us;
+    int allow_wifi = 1;
+    if (interval) {
+        uint64_t now = espradio_time_us_now();
+        if (now - s_last_unmask_us < (uint64_t)interval) {
+            allow_wifi = 0;
+            s_unmask_suppressed++;
+        } else {
+            s_last_unmask_us = now;
+        }
+    }
+
     uint32_t val;
     __asm__ volatile ("rsr %0, intenable" : "=r"(val));
-    val |= s_intenable_snapshot | (1u << ESPRADIO_WIFI_CPU_INT);
+    /* Exclude the WiFi bit from the snapshot restore: the snapshot predates
+     * schedOnce masking it, so OR-ing it back would defeat the rate limit. */
+    val |= s_intenable_snapshot & ~(1u << ESPRADIO_WIFI_CPU_INT);
+    if (allow_wifi) {
+        val |= (1u << ESPRADIO_WIFI_CPU_INT);
+    }
     __asm__ volatile ("wsr %0, intenable; rsync" :: "r"(val));
 
     /* Re-route GPIO source → TinyGo's CPU interrupt in case blob ROM code

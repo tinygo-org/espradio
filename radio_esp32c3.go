@@ -79,6 +79,12 @@ const arenaPoolSize = 48 * 1024
 // hardware interrupt handler.  On RISC-V the interrupt context can
 // safely call the blob's ISR without stack overflow concerns.
 func wifiISRHandler(interrupt.Interrupt) {
+	countHWWiFiISR()
+	// Real interrupt context: mark it so nothing below yields.
+	C.espradio_enter_hw_isr()
 	C.espradio_call_wifi_isr()
+	C.espradio_exit_hw_isr()
+	// Unthrottled deliberately: this is a real hardware event and must be
+	// serviced now.  Only the cooperative-yield path is rate-limited.
 	kickSched()
 }

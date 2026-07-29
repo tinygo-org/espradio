@@ -129,10 +129,16 @@ func setupBTInterrupts() {
 	intr8.Enable()
 }
 
+// Both dispatchers run blob code in real interrupt context, so they mark it:
+// anything they reach that would otherwise spin-and-yield must spin instead.
 func btISR5Handler(interrupt.Interrupt) {
+	C.espradio_enter_hw_isr()
 	C.espradio_bt_isr_dispatch_5()
+	C.espradio_exit_hw_isr()
 }
 
 func btISR8Handler(interrupt.Interrupt) {
+	C.espradio_enter_hw_isr()
 	C.espradio_bt_isr_dispatch_8()
+	C.espradio_exit_hw_isr()
 }

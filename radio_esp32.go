@@ -77,6 +77,9 @@ func makeArenaPool(size int) []byte {
 // Just mask the level-triggered interrupt and wake the scheduler; schedOnce()
 // will call espradio_call_wifi_isr() on its own goroutine stack.
 func wifiISRHandler(interrupt.Interrupt) {
+	countHWWiFiISR()
 	C.espradio_ints_off(C.uint32_t(1 << wifiCPUInterrupt))
+	// Unthrottled deliberately: a real hardware event, and here it is the only
+	// thing that will run the blob ISR, since this handler does not.
 	kickSched()
 }

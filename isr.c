@@ -87,6 +87,24 @@ void espradio_user_exception(uint32_t cause, uint32_t epc, uint32_t excvaddr, ui
 static void (*s_isr_fn[32])(void *) WIFIBSS;
 static void *s_isr_arg[32] WIFIBSS;
 
+/* Zero the handler tables before anything can register into them.
+ *
+ * On ESP32 these live in .wifibss, a custom DRAM1 section, and the runtime zeroes
+ * .bss only -- so they start as whatever was in that RAM.  Measured: the installed
+ * bitmask read 0xffffffff on ESP32 against 1 on the S3, i.e. all 32 entries looked
+ * like valid handlers.  That makes the "if (s_isr_fn[i])" guard in
+ * espradio_call_wifi_isr() useless there: any slot marked in s_wifi_isr_slots
+ * without a matching espradio_set_isr would be called through a garbage pointer.
+ *
+ * Nothing hits that today because only slot 0 is ever marked and it is always
+ * written first, so this is a latch on a trap rather than a fix for a live fault. */
+void espradio_isr_tables_init(void) {
+    for (int i = 0; i < 32; i++) {
+        s_isr_fn[i] = NULL;
+        s_isr_arg[i] = NULL;
+    }
+}
+
 /* Bitmask of ISR slots registered via espradio_set_intr (WiFi sources only). */
 static uint32_t s_wifi_isr_slots;
 
@@ -96,6 +114,34 @@ void espradio_mark_wifi_isr_slot(int32_t n) {
     }
 }
 
+/* Which slots the blob registered.  The prewiring points several peripheral
+ * sources at one CPU interrupt line, so if the blob registers fewer handlers than
+ * there are routed sources, the unhandled ones can assert with nothing to ack
+ * them -- and the line is level-triggered. */
+uint32_t espradio_wifi_isr_slots(void) { return s_wifi_isr_slots; }
+
+/* Blob ISR handler invocations, summed across slots.  Compared against the
+ * scheduler pass count this says whether the handlers are running at all. */
+static volatile uint32_t s_wifi_isr_handler_calls;
+
+uint32_t espradio_wifi_isr_handler_calls(void) { return s_wifi_isr_handler_calls; }
+
+/* Which slots actually hold a handler.
+ *
+ * This is deliberately a different question from espradio_wifi_isr_slots():
+ * handlers arrive via espradio_set_isr (the blob's ets_isr_attach), which writes
+ * s_isr_fn[] and nothing else, whereas the slots mask is written only by
+ * espradio_set_intr.  espradio_call_wifi_isr() iterates the slots mask, so a
+ * handler installed at a slot the mask does not cover is never called -- and
+ * whatever source it belongs to is therefore never acked. */
+uint32_t espradio_wifi_isr_installed(void) {
+    uint32_t mask = 0;
+    for (int i = 0; i < 32; i++) {
+        if (s_isr_fn[i]) mask |= (1u << i);
+    }
+    return mask;
+}
+
 void espradio_set_isr(int32_t n, void *f, void *arg) {
     if (n >= 0 && n < 32) {
         s_isr_fn[n] = (void (*)(void *))f;
@@ -103,9 +149,24 @@ void espradio_set_isr(int32_t n, void *f, void *arg) {
     }
 }
 
-/* ---- ISR context flag ---- */
+/* ---- ISR context flags ---- */
 
+/* s_in_isr means "the blob's ISR body is running", which is what the blob's own
+ * _is_from_isr() is asking about: whether to use its from-ISR queue APIs.  It is
+ * NOT the same question as "am I in hardware interrupt context", because on
+ * ESP32-S3 and ESP32 the blob ISR is invoked from the scheduler goroutine, not
+ * from a trap handler.
+ *
+ * s_in_hw_isr answers that second question, and only the per-target Go interrupt
+ * handlers set it.  Anything that must not yield -- a spin that would otherwise
+ * call runtime.Gosched() -- has to test this one; testing s_in_isr would refuse
+ * to yield on S3/ESP32 in ordinary goroutine context and deadlock instead. */
 static volatile uint32_t s_in_isr = 0;
+static volatile uint32_t s_in_hw_isr = 0;
+
+void espradio_enter_hw_isr(void) { s_in_hw_isr++; }
+void espradio_exit_hw_isr(void)  { if (s_in_hw_isr) s_in_hw_isr--; }
+bool espradio_in_hw_isr(void)    { return s_in_hw_isr != 0; }
 
 __attribute__((weak))
 void espradio_wifi_isr_post_mask(void) {}
@@ -124,6 +185,7 @@ void espradio_call_wifi_isr(void) {
         int i = __builtin_ctz(slots);
         slots &= slots - 1;
         if (s_isr_fn[i]) {
+            s_wifi_isr_handler_calls++;
             s_isr_fn[i](s_isr_arg[i]);
         }
     }

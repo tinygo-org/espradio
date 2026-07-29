@@ -156,8 +156,30 @@ typedef struct espradio_queue {
 static espradio_queue_t *s_queues_head;
 static int s_queues_lock;
 
+/* These spins must yield.
+ *
+ * There is one core and no preemption, so if the holder is another goroutine a
+ * bare spin never terminates -- the holder can only run if we give it the CPU.
+ * event_lock() below already does this; these two did not, which is the bug.
+ *
+ * Yielding here is safe precisely because these are our own locks around our own
+ * queue bookkeeping.  It would NOT be safe inside a region the blob treats as a
+ * critical section: yielding out of one of those is what let two contexts
+ * re-enter the BLE controller's rw_schedule() and deliver a single ACL packet to
+ * the host twice, permanently desynchronising the ATT request/response stream.
+ * The distinction is whose invariant the lock protects, not the lock's shape.
+ *
+ * In real interrupt context there is no goroutine to yield from, so spin instead.
+ * That case tests espradio_in_hw_isr() rather than the blob-facing _is_from_isr,
+ * which is also true when the blob's ISR body runs on the scheduler goroutine. */
+static void spin_yield(void) {
+    if (espradio_in_hw_isr()) return;
+    espradio_task_yield_go();
+}
+
 static void queue_list_lock(void) {
     while (__sync_lock_test_and_set(&s_queues_lock, 1)) {
+        spin_yield();
     }
 }
 
@@ -167,6 +189,7 @@ static void queue_list_unlock(void) {
 
 static void queue_lock(espradio_queue_t *q) {
     while (__sync_lock_test_and_set(&q->lock, 1)) {
+        spin_yield();
     }
 }
 
@@ -281,6 +304,13 @@ static void espradio_queue_delete(void *queue) {
     espradio_generic_queue_delete(queue);
 }
 
+/* Counts sends rejected because the destination queue was full.  block_time_tick
+ * is ignored, so a blob "blocking" send never blocks and the item is simply
+ * lost; this counter is the only evidence that happened. */
+static volatile uint32_t s_queue_send_full;
+
+uint32_t espradio_queue_send_full_count(void) { return s_queue_send_full; }
+
 int32_t espradio_queue_send(void *queue, void *item, uint32_t block_time_tick) {
     (void)block_time_tick;
     espradio_queue_t *q = queue_resolve(queue);
@@ -288,6 +318,7 @@ int32_t espradio_queue_send(void *queue, void *item, uint32_t block_time_tick) {
     queue_lock(q);
     if (q->count == q->len) {
         queue_unlock(q);
+        s_queue_send_full++;
         return 0;
     }
     memcpy(q->storage + ((size_t)q->write * q->item_size), item, q->item_size);
@@ -435,7 +466,10 @@ void *espradio_arena_calloc(size_t n, size_t size);
 void *espradio_arena_realloc(void *ptr, size_t new_size);
 void  espradio_arena_free(void *p);
 
-static void *espradio_malloc(size_t size) {
+/* Non-static so bt_ble.c can route BLE allocations through the same counters.
+ * The BT controller draws from the same arena as WiFi, so allocations that
+ * bypass these wrappers are invisible to espradio_alloc_stats(). */
+void *espradio_malloc(size_t size) {
 #if ESPRADIO_OSI_DEBUG
     printf("osi: malloc %zu\n", size);
 #endif
@@ -443,7 +477,7 @@ static void *espradio_malloc(size_t size) {
     return espradio_arena_alloc(size);
 }
 
-static void espradio_free(void *p) {
+void espradio_free(void *p) {
 #if ESPRADIO_OSI_DEBUG
     printf("osi: free %p\n", (void *)p);
 #endif
@@ -537,8 +571,11 @@ esp_err_t esp_event_handler_register(esp_event_base_t event_base, int32_t event_
     return 0;
 }
 
-void espradio_event_loop_run_once(void) {
-    if (!s_event_loop_ready) return;
+/* Returns 1 if an event was dispatched, 0 if the queue was empty.  The caller
+ * (schedOnce) needs this to tell "drained" from "still has work" -- without it a
+ * fixed-count drain loop cannot know whether it ran out of passes. */
+int espradio_event_loop_run_once(void) {
+    if (!s_event_loop_ready) return 0;
 #if ESPRADIO_OSI_DEBUG
     static uint32_t s_event_loop_idle_log_throttle = 0;
     if ((s_event_loop_idle_log_throttle & 0x1ffu) == 0) {
@@ -555,7 +592,7 @@ void espradio_event_loop_run_once(void) {
         }
         s_event_loop_idle_log_throttle++;
 #endif
-        return;
+        return 0;
     }
     s_event_head = e->next;
     if (!s_event_head) s_event_tail = NULL;
@@ -582,6 +619,7 @@ void espradio_event_loop_run_once(void) {
         espradio_arena_free(e->base);
     espradio_arena_free(e->data);
     espradio_arena_free(e);
+    return 1;
 }
 
 extern void espradio_on_wifi_event(int32_t event_id, void *data);

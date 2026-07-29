@@ -146,12 +146,59 @@ void espradio_wifi_isr_post_mask(void) {
     espradio_ints_off(1u << ESPRADIO_WIFI_CPU_INT);
 }
 
+/* Rate limit on re-enabling the WiFi CPU interrupt.
+ *
+ * Several WiFi peripheral sources share this one level-triggered line and the blob
+ * registers exactly one ISR handler, so a source it does not own -- WIFI_BB --
+ * asserts and is never acked.  Unmasking at the end of every pass therefore
+ * re-fires the interrupt immediately, and the result is a closed loop: measured on
+ * scan with no traffic, 45,190 interrupts and one scheduler pass each per second.
+ *
+ * Un-routing that source is not an option.  Leaving it dangling, or pointing it at
+ * ESP-IDF's ETS_INVALID_INUM (6), both crash inside TinyGo's handleInterrupt --
+ * TinyGo dispatches CPU interrupts 6 through 30, so 6 is a live line here rather
+ * than the nowhere it is under IDF.
+ *
+ * What makes rate-limiting cheap is that this handler does not service anything: it
+ * masks the line and wakes the scheduler, and schedOnce() then calls
+ * espradio_call_wifi_isr() itself on every pass.  So the hardware interrupt only
+ * ever brings a pass forward; the MAC is serviced whether or not it fired.  Holding
+ * the line masked for a while costs at most a little latency, and the ticker
+ * guarantees a pass every 5 ms regardless.
+ *
+ * Zero disables the limit, restoring unmask-every-pass, for A/B on hardware. */
+static volatile uint32_t s_unmask_interval_us = 1000;
+static uint64_t          s_last_unmask_us;
+static volatile uint32_t s_unmask_suppressed;
+
+void espradio_set_unmask_interval_us(uint32_t us) { s_unmask_interval_us = us; }
+uint32_t espradio_unmask_interval_us(void)        { return s_unmask_interval_us; }
+uint32_t espradio_unmask_suppressed(void)         { return s_unmask_suppressed; }
+
 void espradio_wifi_unmask(void) {
     /* Restore any TinyGo-owned INTENABLE bits that blob code may have cleared
      * (e.g. via ROM ets_isr_mask), then ensure the WiFi CPU interrupt is on. */
+    uint32_t interval = s_unmask_interval_us;
+    int allow_wifi = 1;
+    if (interval) {
+        uint64_t now = espradio_time_us_now();
+        if (now - s_last_unmask_us < (uint64_t)interval) {
+            allow_wifi = 0;
+            s_unmask_suppressed++;
+        } else {
+            s_last_unmask_us = now;
+        }
+    }
+
     uint32_t val;
     __asm__ volatile ("rsr %0, intenable" : "=r"(val));
-    val |= s_intenable_snapshot | (1u << ESPRADIO_WIFI_CPU_INT);
+    /* The snapshot was taken before schedOnce masked the WiFi bit, so it still
+     * has that bit set -- it has to be excluded here or the rate limit would be
+     * undone by the very restore it sits next to. */
+    val |= s_intenable_snapshot & ~(1u << ESPRADIO_WIFI_CPU_INT);
+    if (allow_wifi) {
+        val |= (1u << ESPRADIO_WIFI_CPU_INT);
+    }
     __asm__ volatile ("wsr %0, intenable; rsync" :: "r"(val));
 
     /* Re-route GPIO source → TinyGo's CPU interrupt in case blob ROM code

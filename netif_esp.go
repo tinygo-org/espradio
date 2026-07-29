@@ -8,6 +8,7 @@ import "C"
 
 import (
 	"net"
+	"sync/atomic"
 	"unsafe"
 )
 
@@ -67,13 +68,30 @@ func (nd *NetDev) EthPoll(buf []byte) (int, error) {
 	}
 	n := C.espradio_netif_rx_pop(unsafe.Pointer(&buf[0]), C.uint16_t(len(buf)))
 	if n == 0 {
+		// Either the ring was empty, or the frame did not fit and was dropped
+		// whole rather than truncated.  Both mean "no frame for this caller";
+		// the drop is counted in DebugStats as RxOversize.
 		return 0, nil
 	}
 	if nd.rxHandler != nil {
-		nd.rxHandler(buf[:n])
+		// Count rather than propagate.  The handler is the upper stack's ingress
+		// path, and it returns an error for any frame the stack does not handle --
+		// IPv6, STP, stray broadcast -- which is ordinary traffic for a netdev, not
+		// a device failure.  Returning it here would report EthPoll as failing on a
+		// call where it successfully delivered a frame.
+		//
+		// The original defect was that these were invisible, not that they were
+		// unpropagated; DebugStats().RxIngressErrors fixes that without giving
+		// normal traffic an error path.
+		if err := nd.rxHandler(buf[:n]); err != nil {
+			atomic.AddUint32(&rxIngressErrors, 1)
+		}
 	}
 	return int(n), nil
 }
+
+// rxIngressErrors counts frames the upper stack declined to handle.
+var rxIngressErrors uint32
 
 // HardwareAddr6 returns the 6-byte MAC address of the WiFi interface.
 func (nd *NetDev) HardwareAddr6() (mac [6]byte, _ error) {

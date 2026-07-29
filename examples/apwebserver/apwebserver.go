@@ -64,6 +64,16 @@ func main() {
 	http.Handle("/off", logRequest(LED_OFF))
 	http.Handle("/on", logRequest(LED_ON))
 
+	// Driver counters, printed while traffic is flowing.  Most of these count
+	// something being dropped, so a non-zero value is the only evidence it
+	// happened.
+	go func() {
+		for {
+			time.Sleep(10 * time.Second)
+			espradio.DebugStats().Print()
+		}
+	}()
+
 	println("HTTP server listening on http://" + apIP + port)
 	err = http.ListenAndServe(apIP+port, nil)
 	if err != nil {

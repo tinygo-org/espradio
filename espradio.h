@@ -2,6 +2,17 @@
 
 #include "include.h"
 
+/* Store barrier for the single-producer/single-consumer rings shared with ISR
+ * context: publish the payload before publishing the index.  isr.c carries its
+ * own copy because it deliberately includes no blob headers. */
+#ifndef ESPRADIO_MEMORY_BARRIER
+#ifdef __XTENSA__
+#define ESPRADIO_MEMORY_BARRIER() __asm__ volatile ("memw" ::: "memory")
+#else
+#define ESPRADIO_MEMORY_BARRIER() __asm__ volatile ("fence" ::: "memory")
+#endif
+#endif
+
 /* ===== Go → C (implemented in top-level .c files) ===== */
 void espradio_arena_init(uint8_t *base, size_t cap);
 void espradio_arena_stats(uint32_t *used, uint32_t *capacity);
@@ -10,24 +21,37 @@ esp_err_t espradio_wifi_init(void);
 void espradio_wifi_init_completed(void);
 void espradio_timer_fire(void *ptimer);
 void espradio_event_register_default_cb(void);
-void espradio_event_loop_run_once(void);
+int espradio_event_loop_run_once(void);
 int espradio_timer_poll_due(int max_fire);
 int espradio_esp_timer_poll_due(int max_fire);
 void espradio_prepare_memory_for_wifi(void);
 void espradio_ensure_osi_ptr(void);
 void espradio_coex_adapter_init(void);
 void espradio_call_wifi_isr(void);
+void espradio_enter_hw_isr(void);
+void espradio_exit_hw_isr(void);
+bool espradio_in_hw_isr(void);
 void espradio_mark_wifi_isr_slot(int32_t n);
+void espradio_isr_tables_init(void);
 uint32_t espradio_get_wifi_isr_count(void);
+uint32_t espradio_wifi_isr_slots(void);
+uint32_t espradio_wifi_isr_handler_calls(void);
+uint32_t espradio_wifi_isr_installed(void);
 void espradio_prewire_wifi_interrupts(void);
 void espradio_wifi_int_to_level(void);
 void espradio_wifi_int_raise_priority(void);
 void espradio_wifi_unmask(void);
+void espradio_set_unmask_interval_us(uint32_t us);
+uint32_t espradio_unmask_interval_us(void);
+uint32_t espradio_unmask_suppressed(void);
 void espradio_snapshot_intenable(void);
 void espradio_lower_intlevel(void);
 void espradio_ints_on(uint32_t mask);
 void espradio_ints_off(uint32_t mask);
 int32_t espradio_queue_send(void *queue, void *item, uint32_t block_time_tick);
+uint32_t espradio_queue_send_full_count(void);
+void *espradio_malloc(size_t size);
+void  espradio_free(void *p);
 uint32_t espradio_isr_ring_head(void);
 uint32_t espradio_isr_ring_tail(void);
 void     espradio_isr_ring_advance_tail(void);
@@ -58,6 +82,9 @@ void      espradio_netif_init_netstack_cb(void);
 void      espradio_post_start_cb(void);
 void      espradio_save_rom_ptrs(void);
 void      espradio_restore_rom_ptrs(void);
+int       espradio_rom_ptrs_ready(void);
+uint32_t  espradio_rom_ptrs_saved_unready(void);
+uint32_t  espradio_rom_ptrs_missing(void);
 esp_err_t espradio_netif_start_rx(int ap_mode);
 int       espradio_netif_rx_available(void);
 uint16_t  espradio_netif_rx_pop(void *dst, uint16_t dst_len);
@@ -66,6 +93,11 @@ void      espradio_netif_set_connected(int connected);
 esp_err_t espradio_netif_get_mac(uint8_t mac[6]);
 uint32_t  espradio_netif_rx_cb_count(void);
 uint32_t  espradio_netif_rx_cb_drop(void);
+uint32_t  espradio_netif_rx_oversize(void);
+void      espradio_netif_tx_stats(uint32_t *attempts, uint32_t *fail_nomem,
+                                  uint32_t *fail_other, uint32_t *not_connected,
+                                  uint32_t *tx_done, uint32_t *retries,
+                                  uint32_t *busy_waits);
 
 /* ===== C → Go (//export from Go, resolved by linker) ===== */
 __attribute__((noreturn))
@@ -74,6 +106,7 @@ extern uint32_t espradio_log_timestamp(void);
 extern void espradio_run_task(void *task_func, void *param);
 extern uint64_t espradio_time_us_now(void);
 extern void espradio_task_yield_go(void);
+extern void espradio_pump_sched_once(void);
 extern void espradio_hal_init_clocks_go(void);
 extern void espradio_hal_disable_clocks_go(void);
 extern void espradio_hal_wifi_rtc_enable_iso_go(void);

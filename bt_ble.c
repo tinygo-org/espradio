@@ -104,11 +104,19 @@ static void bt_wake_task_throttled(void) {
     bt_isr_wake_task();
 }
 
+/* ISR context depth for the two BT dispatchers.  Read by bt_is_in_isr() further
+ * down, which the blob calls to decide between its normal and from-ISR APIs.
+ * Nothing assigned this before, so that decision was made on the WiFi poll's flag
+ * and was false during every actual BT interrupt. */
+static volatile int s_bt_in_isr;
+
 /* Called from Go ISR handler for CPU interrupt assigned to RWBT+BT_BB */
 void espradio_bt_isr_dispatch_5(void) {
+    s_bt_in_isr++;
     if (s_bt_isr_fn_5) {
         s_bt_isr_fn_5(s_bt_isr_arg_5);
     }
+    s_bt_in_isr--;
     bt_isr_wake_task();
     /* Re-raise priority — TinyGo's trap handler restores to defaultThreshold (5)
      * which equals CPU_INT_THRESH, preventing future interrupts. */
@@ -126,6 +134,7 @@ static volatile uint32_t s_isr_trace_head;
 
 /* Called from Go ISR handler for CPU interrupt assigned to RWBLE */
 void espradio_bt_isr_dispatch_8(void) {
+    s_bt_in_isr++;
     uint32_t n = s_bt_isr8_count++;
     if (n < BT_ISR_TRACE_N) {
         /* Raw BLE core interrupt status, sampled before the blob ISR acks it. */
@@ -136,6 +145,7 @@ void espradio_bt_isr_dispatch_8(void) {
     if (s_bt_isr_fn_8) {
         s_bt_isr_fn_8(s_bt_isr_arg_8);
     }
+    s_bt_in_isr--;
     bt_isr_wake_task();
     /* Re-raise priority — same reason as above */
     BT_CPU_INT_PRI_REG_8 = 7u;
@@ -564,9 +574,8 @@ extern int32_t espradio_queue_send_from_isr(void *queue, void *item, void *hptw)
 extern int32_t espradio_queue_recv(void *queue, void *item, uint32_t block_time_tick);
 extern int32_t espradio_queue_recv_from_isr(void *queue, void *item, void *hptw);
 
-/* ─── ISR context tracking ─── */
-static volatile int s_bt_in_isr;
-
+/* ─── ISR context tracking ───
+ * s_bt_in_isr is maintained by the two BT dispatchers near the top of this file. */
 static int bt_is_in_isr(void) {
     return s_bt_in_isr > 0 || espradio_is_from_isr();
 }
@@ -692,12 +701,19 @@ static int bt_semphr_give_from_isr(void *semphr, void *hptw) {
 }
 
 /* ─── Memory ─── */
+/* Route through the osi.c wrappers rather than straight to the arena, so BLE
+ * allocations are counted by espradio_alloc_stats().  The BT controller and the
+ * WiFi blob share one arena, so BLE bypassing the counters made the reported
+ * alloc/free totals describe only half the users of the pool. */
+extern void *espradio_malloc(size_t size);
+extern void  espradio_free(void *p);
+
 static void *bt_malloc(uint32_t size) {
-    return espradio_arena_alloc((size_t)size);
+    return espradio_malloc((size_t)size);
 }
 
 static void bt_free(void *ptr) {
-    espradio_arena_free(ptr);
+    espradio_free(ptr);
 }
 
 static int bt_read_efuse_mac(void *mac) {
