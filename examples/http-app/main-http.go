@@ -7,6 +7,11 @@
 // navigating to the IP address assigned to the ESP32 in your browser.
 // Click the "Toggle LED" button to see the LED state change and the action recorded on the webpage.
 //
+// Requests are served by a httphi.Router: it allocates its exchanges (request
+// header buffer, response header buffer) and its worker goroutines once at
+// Configure time, so serving requests costs no allocation and memory does not
+// grow with load. Accepting connections is still this program's job.
+//
 // tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=YourSSID -X main.password=YourPassword" -monitor ./examples/http-app
 package main
 
@@ -21,7 +26,7 @@ import (
 	"unsafe"
 
 	"github.com/soypat/lneto"
-	"github.com/soypat/lneto/http/httpraw"
+	"github.com/soypat/lneto/http/httphi"
 	"github.com/soypat/lneto/tcp"
 	"github.com/soypat/lneto/x/xnet"
 	"tinygo.org/x/espradio"
@@ -36,8 +41,20 @@ const (
 	ntpHost    = "pool.ntp.org"
 	pollTime   = 5 * time.Millisecond
 	maxConns   = 4
-	httpBuf    = 1024
 	listenPort = 80
+
+	// reqHeaderBuf bounds the request header. The router refuses to grow it, so
+	// a request whose header does not fit is answered 431 instead of eating memory.
+	reqHeaderBuf = 1024
+	// respHeaderBuf is the room for staged response header fields. The status
+	// line does not count towards it and unused request memory is reused.
+	respHeaderBuf = 128
+	// numHeaderFields is how many request header fields are parsed before
+	// answering 431. A browser sends around twenty. Each field costs 8 bytes.
+	numHeaderFields = 32
+	// connDeadline fails the reads/writes of a peer that opens a connection and
+	// then stalls, instead of it holding a router goroutine forever.
+	connDeadline = 8 * time.Second
 
 	templateActionMarker = "<!--A-->"
 )
@@ -108,9 +125,7 @@ func main() {
 	println("got IP:", addr.String())
 
 	lstack := espstack.LnetoStack()
-	rstack := lstack.StackRetrying(lneto.BackoffStrategy(func(_ uint) time.Duration {
-		return pollTime
-	}))
+	rstack := lstack.StackRetrying(pollBackoff)
 	gatewayHW, err := rstack.DoResolveHardwareAddress6(dhcp.Router, 500*time.Millisecond, 4)
 	if err != nil {
 		failure("ARP resolve failed: " + err.Error())
@@ -135,12 +150,7 @@ func main() {
 		RxBufSize:          1024,
 		EstablishedTimeout: 5 * time.Second,
 		ClosingTimeout:     5 * time.Second,
-		NewUserData: func() any {
-			cs := new(connState)
-			cs.hdr.Reset(cs.httpBuf[:])
-			return cs
-		},
-		NewBackoff: func() lneto.BackoffStrategy { return pollBackoff },
+		NewBackoff:         func() lneto.BackoffStrategy { return pollBackoff },
 	})
 	if err != nil {
 		failure("tcppool create: " + err.Error())
@@ -157,16 +167,30 @@ func main() {
 		failure("listener register: " + err.Error())
 	}
 
+	// The mux resolves method+path to the handler serving it. Paths are matched
+	// exactly and the query string is the handler's business, so
+	// "/toggle-led?callsign=pato" lands on handleToggleLED. Anything else is 404.
+	var mux httphi.MuxSlice
+	var server Server
+	server.InitAndRegister(&mux)
+	// Router allocates its exchanges and goroutines here and never again.
+	var router httphi.Router
+	err = router.Configure(httphi.RouterConfig{
+		FixedNumGoroutines:          maxConns,
+		MaxAwaitingConns:            maxConns,
+		RequestHeaderBufferSize:     reqHeaderBuf,
+		ResponseHeaderMinBufferSize: respHeaderBuf,
+		RequestNumHeaderKVCap:       numHeaderFields,
+		Mux:                         &mux,
+	})
+	if err != nil {
+		failure("router configure: " + err.Error())
+	}
+	defer router.Shutdown() // Despawns goroutines.
+
 	println("listening on", "http://"+listenAddr.String())
 	lstack.Debug("init-complete")
 
-	// Pre-allocate worker goroutines so stacks are allocated once at startup
-	// instead of per-connection. Maintains full concurrency up to maxConns.
-	jobCh := make(chan connJob, maxConns)
-	for range maxConns {
-		go connWorker(jobCh)
-	}
-	lstack.Debug("goroutines allocated")
 	for {
 		if listener.NumberOfReadyToAccept() == 0 {
 			time.Sleep(pollTime)
@@ -174,13 +198,21 @@ func main() {
 			continue
 		}
 
-		conn, userData, err := listener.TryAccept()
+		conn, _, err := listener.TryAccept()
 		if err != nil {
 			println("err listener accept:", err.Error())
 			time.Sleep(time.Second)
 			continue
 		}
-		jobCh <- connJob{conn: conn, cs: userData.(*connState), stack: lstack}
+		printIncoming(conn)
+		conn.SetDeadline(time.Now().Add(connDeadline))
+		err = router.Handle(conn)
+		if err != nil {
+			// Every router goroutine is busy and the queue is full. Dropping the
+			// connection is the backpressure that keeps memory bounded.
+			println("dropped connection:", err.Error())
+			conn.Close()
+		}
 	}
 }
 
@@ -188,30 +220,59 @@ var pollBackoff = lneto.BackoffStrategy(func(_ uint) time.Duration {
 	return pollTime
 })
 
-// connState holds all per-connection buffers, pre-allocated during pool init.
-// Eliminates per-connection heap escapes of local arrays (buf, dynBuf, csBuf)
-// and the make([]byte, httpBuf) that exceeds TinyGo's 256-byte stack limit.
-type connState struct {
-	hdr     httpraw.Header
-	httpBuf [httpBuf]byte
-	buf     [128]byte
-	dynBuf  [256]byte
-	csBuf   [9]byte
+type Server struct {
+	state       ServerState
+	scratchPool sync.Pool
 }
 
-type connJob struct {
-	conn  *tcp.Conn
-	cs    *connState
-	stack *xnet.StackAsync
+// scratch holds the work buffers a handler needs beyond the exchange's own
+// memory. One is checked out per request instead of declaring the buffers as
+// locals, which TinyGo would escape to the heap on every request.
+type scratch struct {
+	dyn [1024]byte // Rendered action list, sized so append never grows it.
 }
 
-type page uint8
+func (sv *Server) InitAndRegister(mux *httphi.MuxSlice) {
+	sv.scratchPool.New = func() interface{} { return &scratch{} }
+	mux.Handle("GET /", sv.handleLanding)
+	mux.Handle("GET /toggle-led", sv.handleToggleLED)
+}
 
-const (
-	pageNotExists page = iota
-	pageLanding
-	pageToggleLED
-)
+func (sv *Server) handleLanding(exch *httphi.Exchange) {
+	println("Got webpage request!")
+	scratch := sv.scratchPool.Get().(*scratch)
+	defer sv.scratchPool.Put(scratch)
+
+	dynContent := sv.state.AppendActionsHTML(scratch.dyn[:0])
+	if len(dynContent) > len(scratch.dyn) {
+		println("[WARN] dynamic content outgrew scratch, heap allocated:", cap(dynContent))
+	}
+	exch.StageHeader("Content-Type", "text/html")
+	exch.StageHeaderInt("Content-Length", int64(len(htmlTemplate)+len(dynContent)))
+	// The router serves one exchange per connection and then closes it. Saying so
+	// avoids notably slower paint times in the browser. Content-Length above is
+	// what keeps the browser from treating the close as a truncated page.
+	exch.StageHeader("Connection", "close")
+	exch.WriteHeader(httphi.StatusOK)
+	exch.WriteBody(htmlTemplate[:htmlActionIdx])
+	exch.WriteBody(dynContent)
+	exch.WriteBody(htmlTemplate[htmlActionIdx:])
+	time.Sleep(pollTime)
+}
+
+func (sv *Server) handleToggleLED(exch *httphi.Exchange) {
+	println("got toggle led request")
+	scratch := sv.scratchPool.Get().(*scratch)
+	defer sv.scratchPool.Put(scratch)
+
+	// The raw view aliases the exchange buffer, no copy needed: sanitizeCallsign
+	// stops at the first non-letter, so a percent escape ends the callsign.
+	rawCallsign, _ := exch.RequestQueryValue("callsign")
+	sv.state.RecordToggle(sanitizeCallsign(scratch.dyn[:0], rawCallsign))
+	exch.StageHeader("Content-Length", "0")
+	exch.StageHeader("Connection", "close")
+	exch.WriteHeader(httphi.StatusOK)
+}
 
 // ServerState stores the state of the HTTP server. It has a ring buffer with last 8 actions
 // performed. Every time a new action is performed it replaces the oldest action by advancing the ring buffer.
@@ -228,8 +289,6 @@ type Action struct {
 	CallsignLen uint8
 	TurnedLEDOn bool
 }
-
-var state ServerState
 
 func (s *ServerState) RecordToggle(callsign []byte) {
 	s.mu.Lock()
@@ -294,19 +353,6 @@ func appendDurationAgo(dst []byte, d time.Duration) []byte {
 	return dst
 }
 
-func parseCallsignValue(query []byte) []byte {
-	const key = "callsign="
-	idx := bytes.Index(query, []byte(key))
-	if idx < 0 || (idx > 0 && query[idx-1] != '&') {
-		return nil
-	}
-	val := query[idx+len(key):]
-	if end := bytes.IndexByte(val, '&'); end >= 0 {
-		val = val[:end]
-	}
-	return val
-}
-
 func sanitizeCallsign(dst, raw []byte) []byte {
 	dst = dst[:0]
 	for _, b := range raw {
@@ -324,142 +370,20 @@ func sanitizeCallsign(dst, raw []byte) []byte {
 	return dst
 }
 
-func connWorker(ch <-chan connJob) {
-	for job := range ch {
-		handleConn(job.conn, job.cs, job.stack)
-	}
-}
+// addrBuf formats remote addresses in printIncoming. Only the accept loop uses it.
+var addrBuf [64]byte
 
-func handleConn(conn *tcp.Conn, cs *connState, stack *xnet.StackAsync) {
-	defer conn.Close()
-	const AsRequest = false
-	hdr := &cs.hdr
-	hdr.Reset(nil)
-	buf := cs.buf[:]
-
-	stack.Debug("conn-start")
-	conn.SetDeadline(time.Now().Add(8 * time.Second))
+func printIncoming(conn *tcp.Conn) {
 	remoteAddr, _ := netip.AddrFromSlice(conn.RemoteAddr())
 	print("incoming connection: ")
-	printAddr(remoteAddr, buf[:0])
+	printAddr(remoteAddr, addrBuf[:0])
 	println(" from port", conn.RemotePort())
-	stack.Debug("post-deadline+println")
-
-	for {
-		n, err := conn.Read(buf)
-		if n > 0 {
-			hdr.ReadFromBytes(buf[:n])
-			needMoreData, err := hdr.TryParse(AsRequest)
-			if err != nil && !needMoreData {
-				println("parsing HTTP request:", err.Error())
-				return
-			}
-			if !needMoreData {
-				break
-			}
-		}
-		if err != nil {
-			println("read error:", err.Error())
-			return
-		}
-		closed := conn.State() != tcp.StateEstablished
-		if closed {
-			break
-		} else if hdr.BufferReceived() >= httpBuf {
-			println("too much HTTP data")
-			return
-		}
-	}
-	// BEGIN PARSING REQUEST.
-	uri := hdr.RequestURI()
-	uriPath := uri
-	var uriQuery []byte
-	if qIdx := bytes.IndexByte(uri, '?'); qIdx >= 0 {
-		uriPath = uri[:qIdx]
-		uriQuery = uri[qIdx+1:]
-	}
-
-	var requestedPage page
-	switch {
-	case bytesEqual(uriPath, "/"):
-		println("Got webpage request!")
-		requestedPage = pageLanding
-	case bytesEqual(uriPath, "/toggle-led"):
-		println("got toggle led request")
-		requestedPage = pageToggleLED
-		callsign := sanitizeCallsign(cs.csBuf[:0], parseCallsignValue(uriQuery))
-		state.RecordToggle(callsign)
-	}
-
-	stack.Debug("post-read-loop")
-	// BEGIN RESPONSE.
-	// Reuse header to write response.
-	hdr.Reset(nil)
-	stack.Debug("post-reset")
-	hdr.SetProtocol("HTTP/1.1")
-	stack.Debug("post-setproto")
-	if requestedPage == pageNotExists {
-		hdr.SetStatus("404", "Not Found")
-	} else {
-		hdr.SetStatus("200", "OK")
-	}
-	stack.Debug("post-setstatus")
-	// We call Close() on exiting this function.
-	// If we omit Connection:close in header we'll have notably slower paint times in browser.
-	// One thing to keep in mind when using Connection:close is using Content-Length to prevent early browser close.
-	hdr.Set("Connection", "close")
-	stack.Debug("post-set-conn-close")
-	switch requestedPage {
-	case pageLanding:
-		dynContent := state.AppendActionsHTML(cs.dynBuf[:0])
-		contentLength := len(htmlTemplate) + len(dynContent)
-		buf = strconv.AppendUint(buf[:0], uint64(contentLength), 10)
-		stack.Debug("post-appendhtml")
-		hdr.Set("Content-Type", "text/html")
-		hdr.SetBytes("Content-Length", buf)
-		responseHeader, err := hdr.AppendResponse(buf[:0])
-		if err != nil {
-			println("error appending:", err.Error())
-		}
-		conn.Write(responseHeader)
-		conn.Write(htmlTemplate[:htmlActionIdx])
-		conn.Write(dynContent)
-		conn.Write(htmlTemplate[htmlActionIdx:])
-		time.Sleep(pollTime)
-
-	case pageToggleLED:
-		hdr.Set("Content-Length", "0")
-		responseHeader, err := hdr.AppendResponse(buf[:0])
-		if err != nil {
-			println("error appending:", err.Error())
-		}
-		conn.Write(responseHeader)
-
-	default:
-		responseHeader, err := hdr.AppendResponse(buf[:0])
-		if err != nil {
-			println("error appending:", err.Error())
-		}
-		conn.Write(responseHeader)
-	}
-	stack.Debug("pre-close")
 }
 
 // printAddr prints a netip.Addr without heap allocation by formatting into buf.
 func printAddr(addr netip.Addr, buf []byte) {
 	buf = addr.AppendTo(buf[:0])
 	print(unsafe.String(&buf[0], len(buf)))
-}
-
-// bytesEqual compares a byte slice to a string without heap allocation.
-func bytesEqual(b []byte, s string) bool {
-	if len(b) != len(s) {
-		return false
-	}
-	if len(b) == 0 {
-		return true
-	}
-	return unsafe.String(&b[0], len(b)) == s
 }
 
 func loopForeverStack(stack *espradio.Stack) {

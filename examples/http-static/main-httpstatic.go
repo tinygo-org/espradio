@@ -3,17 +3,22 @@
 // embedded `index.html` file. You can test it by connecting to the same Wi-Fi network
 // as the ESP32 and navigating to the IP address assigned to the ESP32 in your browser.
 //
+// Requests are served by a httphi.Router: it allocates its exchanges (request
+// header buffer, response header buffer) and its worker goroutines once at
+// Configure time, so serving requests costs no allocation and memory does not
+// grow with load. Accepting connections is still this program's job.
+//
 // tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=YourSSID -X main.password=YourPassword" -monitor ./examples/http-static
 package main
 
 import (
 	_ "embed"
-	"net"
 	"net/netip"
-	"strconv"
+	"sync"
 	"time"
 
-	"github.com/soypat/lneto/http/httpraw"
+	"github.com/soypat/lneto"
+	"github.com/soypat/lneto/http/httphi"
 	"github.com/soypat/lneto/tcp"
 	"github.com/soypat/lneto/x/xnet"
 	"tinygo.org/x/espradio"
@@ -27,14 +32,25 @@ var (
 const (
 	pollTime   = 5 * time.Millisecond
 	maxConns   = 4
-	httpBuf    = 1024
 	listenPort = 80
+
+	// reqHeaderBuf bounds the request header. The router refuses to grow it, so
+	// a request whose header does not fit is answered 431 instead of eating memory.
+	reqHeaderBuf = 1024
+	// respHeaderBuf is the room for staged response header fields. The status
+	// line does not count towards it and unused request memory is reused.
+	respHeaderBuf = 128
+	// numHeaderFields is how many request header fields are parsed before
+	// answering 431. A browser sends around twenty. Each field costs 8 bytes.
+	numHeaderFields = 32
+	// connDeadline fails the reads/writes of a peer that opens a connection and
+	// then stalls, instead of it holding a router goroutine forever.
+	connDeadline = 8 * time.Second
 )
 
 var (
 	//go:embed index.html
-	webPage      []byte
-	lastLEDState bool
+	webPage []byte
 )
 
 func setLED(lightOn bool) {
@@ -100,12 +116,7 @@ func main() {
 		RxBufSize:          256,
 		EstablishedTimeout: 5 * time.Second,
 		ClosingTimeout:     5 * time.Second,
-		NewUserData: func() any {
-			var hdr httpraw.Header
-			buf := make([]byte, httpBuf)
-			hdr.Reset(buf)
-			return &hdr
-		},
+		NewBackoff:         func() lneto.BackoffStrategy { return pollBackoff },
 	})
 	if err != nil {
 		failure("tcppool create: " + err.Error())
@@ -130,111 +141,99 @@ func main() {
 	if err != nil {
 		failure("listener register: " + err.Error())
 	}
+
+	// The mux resolves method+path to the handler serving it, paths matched
+	// exactly. Anything not registered below is answered 404 by the router.
+	var mux httphi.MuxSlice
+	var server Server
+	server.InitAndRegister(&mux)
+	// Router allocates its exchanges and goroutines here and never again.
+	var router httphi.Router
+	err = router.Configure(httphi.RouterConfig{
+		FixedNumGoroutines:          maxConns,
+		MaxAwaitingConns:            maxConns,
+		RequestHeaderBufferSize:     reqHeaderBuf,
+		ResponseHeaderMinBufferSize: respHeaderBuf,
+		RequestNumHeaderKVCap:       numHeaderFields,
+		Mux:                         &mux,
+	})
+	if err != nil {
+		failure("router configure: " + err.Error())
+	}
+	defer router.Shutdown() // Despawns goroutines.
+
 	println("listening on", "http://"+listenAddr.String())
 
 	for {
 		if listener.NumberOfReadyToAccept() == 0 {
-			time.Sleep(5 * time.Millisecond)
+			time.Sleep(pollTime)
 			tcpPool.CheckTimeouts()
 			continue
 		}
 
-		conn, httpBuf, err := listener.TryAccept()
+		conn, _, err := listener.TryAccept()
 		if err != nil {
 			println("listener accept err", err.Error())
 			time.Sleep(time.Second)
 			continue
 		}
-		// Beware, this allocates a stack on the heap on
-		// every connection. See http-app example on
-		// how to allocate a pool of connections up front
-		// and avoid heap allocations.
-		go handleConn(conn, httpBuf.(*httpraw.Header))
+		remoteAddr, _ := netip.AddrFromSlice(conn.RemoteAddr())
+		println("incoming connection:", remoteAddr.String(), "from port", conn.RemotePort())
+		conn.SetDeadline(time.Now().Add(connDeadline))
+		err = router.Handle(conn)
+		if err != nil {
+			// Every router goroutine is busy and the queue is full. Dropping the
+			// connection is the backpressure that keeps memory bounded.
+			println("dropped connection:", err.Error())
+			conn.Close()
+		}
 	}
 }
 
-type page uint8
+var pollBackoff = lneto.BackoffStrategy(func(_ uint) time.Duration {
+	return pollTime
+})
 
-const (
-	pageNotExits  page = iota
-	pageLanding        // /
-	pageToggleLED      // /toggle-led
-)
+// Server holds the state the handlers share. Handlers run on the router's
+// goroutines, up to maxConns of them at a time, so state they touch is guarded.
+// Both responses here are static, so unlike the http-app example this server
+// needs no scratch buffer pool: nothing is rendered per request.
+type Server struct {
+	mu       sync.Mutex
+	ledState bool
+}
 
-func handleConn(conn *tcp.Conn, hdr *httpraw.Header) {
-	defer conn.Close()
-	const AsRequest = false
-	var buf [64]byte
-	hdr.Reset(nil)
+func (sv *Server) InitAndRegister(mux *httphi.MuxSlice) {
+	mux.Handle("GET /", sv.handleLanding)
+	mux.Handle("GET /toggle-led", sv.handleToggleLED)
+}
 
-	remoteAddr, _ := netip.AddrFromSlice(conn.RemoteAddr())
-	println("incoming connection:", remoteAddr.String(), "from port", conn.RemotePort())
-
-	for {
-		n, err := conn.Read(buf[:])
-		if n > 0 {
-			hdr.ReadFromBytes(buf[:n])
-			needMoreData, err := hdr.TryParse(AsRequest)
-			if err != nil && !needMoreData {
-				println("parsing HTTP request:", err.Error())
-				return
-			}
-			if !needMoreData {
-				break
-			}
-		}
-		closed := err == net.ErrClosed || conn.State() != tcp.StateEstablished
-		if closed {
-			break
-		} else if hdr.BufferReceived() >= httpBuf {
-			println("too much HTTP data")
-			return
-		}
-	}
-	// Check requested requestedPage URI.
-	var requestedPage page
-	uri := hdr.RequestURI()
-	switch string(uri) {
-	case "/":
-		println("Got webpage request!")
-		requestedPage = pageLanding
-	case "/toggle-led":
-		println("got toggle led request")
-		requestedPage = pageToggleLED
-		lastLEDState = !lastLEDState
-		setLED(lastLEDState)
-	}
-
-	// Prepare response with same buffer.
-	hdr.Reset(nil)
-	hdr.SetProtocol("HTTP/1.1")
-	if requestedPage == pageNotExits {
-		hdr.SetStatus("404", "Not Found")
-	} else {
-		hdr.SetStatus("200", "OK")
-	}
-	var body []byte
-	switch requestedPage {
-	case pageLanding:
-		body = webPage
-		hdr.Set("Content-Type", "text/html")
-	}
-	if len(body) > 0 {
-		hdr.Set("Content-Length", strconv.Itoa(len(body)))
-	}
-	responseHeader, err := hdr.AppendResponse(buf[:0])
+func (sv *Server) handleLanding(exch *httphi.Exchange) {
+	println("Got webpage request!")
+	exch.StageHeader("Content-Type", "text/html")
+	exch.StageHeaderInt("Content-Length", int64(len(webPage)))
+	// The router serves one exchange per connection and then closes it. Saying so
+	// avoids notably slower paint times in the browser. Content-Length above is
+	// what keeps the browser from treating the close as a truncated page.
+	exch.StageHeader("Connection", "close")
+	exch.WriteHeader(httphi.StatusOK)
+	_, err := exch.WriteBody(webPage)
 	if err != nil {
-		println("error appending:", err.Error())
+		println("writing body:", err.Error())
 	}
-	conn.Write(responseHeader)
-	if len(body) > 0 {
-		_, err := conn.Write(body)
-		if err != nil {
-			println("writing body:", err.Error())
-		}
-		time.Sleep(pollTime)
-	}
-	// connection closed automatically by defer.
+	time.Sleep(pollTime)
+}
+
+func (sv *Server) handleToggleLED(exch *httphi.Exchange) {
+	println("got toggle led request")
+	sv.mu.Lock()
+	sv.ledState = !sv.ledState
+	setLED(sv.ledState)
+	sv.mu.Unlock()
+
+	exch.StageHeader("Content-Length", "0")
+	exch.StageHeader("Connection", "close")
+	exch.WriteHeader(httphi.StatusOK)
 }
 
 func loopForeverStack(stack *espradio.Stack) {

@@ -1,5 +1,9 @@
 github.com/soypat/lneto v0.2.1 h1:o07lXylFCkRs4djA9PYrIf0oW+tMLjxO2/JbHv2XoK0=
 github.com/soypat/lneto v0.2.1/go.mod h1:Be5PjwoYukvHFiUXxpYi8+ppH2F/gw/vjGBvFdv+Ti8=
+github.com/soypat/lneto v0.2.2-0.20260729232021-5c54030f19ab h1:hL+0eDrqfNmYkRJ8/CPEZ+VRGnD4Hngia5AnLNksa4w=
+github.com/soypat/lneto v0.2.2-0.20260729232021-5c54030f19ab/go.mod h1:Be5PjwoYukvHFiUXxpYi8+ppH2F/gw/vjGBvFdv+Ti8=
+github.com/soypat/lneto v0.2.2-0.20260730040551-aa259d1efd49 h1:JFXNmg57inaN68UXNZpiLjJeMyKigUeJSRM0n2XH3MM=
+github.com/soypat/lneto v0.2.2-0.20260730040551-aa259d1efd49/go.mod h1:Be5PjwoYukvHFiUXxpYi8+ppH2F/gw/vjGBvFdv+Ti8=
 github.com/soypat/natiu-mqtt v0.7.0 h1:94nWBMt2Pxu+8uEXvOIUXLp6hNWv5912D1qPH6wbGAg=
 github.com/soypat/natiu-mqtt v0.7.0/go.mod h1:xEta+cwop9izVCW7xOx2W+ct9PRMqr0gNVkvBPnQTc4=
 tinygo.org/x/drivers v0.35.1-0.20260604174950-1d695a231aef h1:nG/qd6hSQonHse2l8DYUrCuJSiCfcFD9n8YMze8sVo0=
