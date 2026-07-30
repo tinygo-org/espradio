@@ -140,9 +140,6 @@ void ets_intr_unlock(void);
 
 /* ===== BLE (bt_ble.c) ===== */
 int  espradio_ble_init(void);
-int  espradio_vhci_buffered(void);
-int  espradio_vhci_read_byte(void);
-int  espradio_vhci_read(uint8_t *buf, int max_len);
 int  espradio_vhci_write(const uint8_t *data, int len);
 void espradio_bt_isr_dispatch_5(void);
 void espradio_bt_isr_dispatch_8(void);

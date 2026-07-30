@@ -453,7 +453,8 @@ uint32_t espradio_bt_intc_pending(void) {
  * VHCI Ring Buffer (controller → host)
  * ═══════════════════════════════════════════════════════════════════════════ */
 
-/* The ring itself lives in vhci_ring.c so the unit-test target can reach it. */
+/* The ring itself is implemented in Go (vhci_ring.go), which is what lets the
+ * unit-test target reach it without the BTDM blob. */
 extern int espradio_vhci_ring_push(const uint8_t *data, int len);
 
 static volatile int s_vhci_send_available = 1;
@@ -485,7 +486,7 @@ static void vhci_host_send_available_cb(void) {
     s_vhci_send_available = 1;
 }
 
-/* espradio_vhci_buffered / _read_byte / _read live in vhci_ring.c */
+/* The consumer side (buffered / read_byte / read) is Go-only: see vhci_ring.go. */
 
 /* ROM VHCI API */
 extern bool API_vhci_host_check_send_available(void);

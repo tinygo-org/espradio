@@ -32,13 +32,13 @@ type VHCITransport struct{}
 
 // Buffered returns the number of bytes available to read from the controller.
 func (t VHCITransport) Buffered() int {
-	return int(C.espradio_vhci_buffered())
+	return vhciBuffered()
 }
 
 // ReadByte reads a single byte from the HCI controller.
 func (t VHCITransport) ReadByte() (byte, error) {
 	for {
-		b := int(C.espradio_vhci_read_byte())
+		b := vhciReadByte()
 		if b >= 0 {
 			return byte(b), nil
 		}
@@ -52,7 +52,7 @@ func (t VHCITransport) Read(buf []byte) (int, error) {
 		return 0, nil
 	}
 	for {
-		n := int(C.espradio_vhci_read((*C.uint8_t)(unsafe.Pointer(&buf[0])), C.int(len(buf))))
+		n := vhciRead(buf)
 		if n > 0 {
 			return n, nil
 		}
