@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"net"
 	"net/netip"
 	"strconv"
@@ -17,6 +18,7 @@ import (
 	"github.com/soypat/lneto/http/httpraw"
 	"github.com/soypat/lneto/x/xnet"
 	nl "tinygo.org/x/drivers/netlink"
+	"tinygo.org/x/espradio/netlink"
 	link "tinygo.org/x/espradio/netlink"
 )
 
@@ -35,8 +37,7 @@ var scratchPool sync.Pool
 const scratchSize = 128
 
 const (
-	listenPort = 80
-	port       = ":80"
+	port = ":80"
 )
 
 var (
@@ -48,7 +49,7 @@ func main() {
 	// wait a bit for serial
 	time.Sleep(2 * time.Second)
 
-	link := link.Esplink{}
+	link := &link.Esplink{}
 
 	println("Connecting to WiFi...")
 	err := link.NetConnect(&nl.ConnectParams{
@@ -80,20 +81,8 @@ func main() {
 		failure("configure Router: " + err.Error())
 	}
 	defer router.Shutdown() // Despawns goroutines.
-	// Listen by asking the lneto stack for a socket directly instead of going
-	// through stdlib net.Listen and the netdev file descriptor layer. An
-	// unspecified local address with no remote is a passive socket, so the
-	// stack hands back a net.Listener over its own tcp.Listener and conn pool.
-	stack := link.StackGo()
-	laddr := netip.AddrPortFrom(netip.IPv4Unspecified(), listenPort)
-	sock, err := stack.SocketNetip(context.Background(), "tcp4", xnet.AF_INET, xnet.SOCK_STREAM, laddr, netip.AddrPort{})
-	if err != nil {
-		failure("opening port: " + err.Error())
-	}
-	listener, ok := sock.(net.Listener)
-	if !ok {
-		failure("stack returned non-listener socket")
-	}
+
+	listener, err := Listen(link, port)
 	defer listener.Close()
 	h, _ := link.Addr()
 	host := h.String()
@@ -173,4 +162,23 @@ func failure(msg string) {
 		println("failure:", msg)
 		time.Sleep(1 * time.Second)
 	}
+}
+
+func Listen(link *netlink.Esplink, port string) (net.Listener, error) {
+	// Listen by asking the lneto stack for a socket directly instead of going
+	// through stdlib net.Listen and the netdev file descriptor layer due to a bug.
+	stack := link.StackGo()
+	laddr, err := netip.ParseAddrPort("0.0.0.0" + port)
+	if err != nil {
+		return nil, err
+	}
+	sock, err := stack.SocketNetip(context.Background(), "tcp4", xnet.AF_INET, xnet.SOCK_STREAM, laddr, netip.AddrPort{})
+	if err != nil {
+		return nil, err
+	}
+	listener, ok := sock.(net.Listener)
+	if !ok {
+		return nil, errors.New("stack returned non-listener socket")
+	}
+	return listener, nil
 }
