@@ -1,6 +1,7 @@
 esp-wifi
-./vscode
+/.vscode
+/local
 *.bin
 *.elf
 build
-
+*.log

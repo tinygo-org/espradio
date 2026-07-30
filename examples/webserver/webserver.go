@@ -5,15 +5,17 @@
 package main
 
 import (
+	"context"
 	_ "embed"
 	"net"
+	"net/netip"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/soypat/lneto/http/httphi"
 	"github.com/soypat/lneto/http/httpraw"
-	"tinygo.org/x/drivers/netdev"
+	"github.com/soypat/lneto/x/xnet"
 	nl "tinygo.org/x/drivers/netlink"
 	link "tinygo.org/x/espradio/netlink"
 )
@@ -32,10 +34,14 @@ var scratchPool sync.Pool
 
 const scratchSize = 128
 
+const (
+	listenPort = 80
+	port       = ":80"
+)
+
 var (
 	ssid     string
 	password string
-	port     string = ":80"
 )
 
 func main() {
@@ -43,7 +49,6 @@ func main() {
 	time.Sleep(2 * time.Second)
 
 	link := link.Esplink{}
-	netdev.UseNetdev(&link)
 
 	println("Connecting to WiFi...")
 	err := link.NetConnect(&nl.ConnectParams{
@@ -75,11 +80,21 @@ func main() {
 		failure("configure Router: " + err.Error())
 	}
 	defer router.Shutdown() // Despawns goroutines.
-
-	listener, err := net.Listen("tcp", port)
+	// Listen by asking the lneto stack for a socket directly instead of going
+	// through stdlib net.Listen and the netdev file descriptor layer. An
+	// unspecified local address with no remote is a passive socket, so the
+	// stack hands back a net.Listener over its own tcp.Listener and conn pool.
+	stack := link.StackGo()
+	laddr := netip.AddrPortFrom(netip.IPv4Unspecified(), listenPort)
+	sock, err := stack.SocketNetip(context.Background(), "tcp4", xnet.AF_INET, xnet.SOCK_STREAM, laddr, netip.AddrPort{})
 	if err != nil {
 		failure("opening port: " + err.Error())
 	}
+	listener, ok := sock.(net.Listener)
+	if !ok {
+		failure("stack returned non-listener socket")
+	}
+	defer listener.Close()
 	h, _ := link.Addr()
 	host := h.String()
 	println("HTTP server listening on http://" + host + port)
@@ -88,7 +103,7 @@ func main() {
 		if err != nil {
 			failure("failed to accept conn: " + err.Error())
 		}
-		conn.SetDeadline(time.Now().Add(time.Second))
+		// conn.SetDeadline(time.Now().Add(time.Second))
 		err = router.Handle(conn)
 		if err != nil {
 			conn.Close()

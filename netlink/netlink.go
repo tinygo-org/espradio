@@ -27,6 +27,7 @@ type Esplink struct {
 	notifyCb func(nl.Event)
 
 	netstack  *espradio.Stack
+	gostack   xnet.StackGo
 	berkeley  xnet.StackBerkeley
 	stackloop sync.Once
 
@@ -122,9 +123,9 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 	}
 	n.stackloop.Do(func() {
 		// Start stack goroutine once.
-		gostack := n.netstack.LnetoStack().StackGo(pollBackoff, xnet.StackGoConfig{
+		n.gostack = n.netstack.LnetoStack().StackGo(pollBackoff, xnet.StackGoConfig{
 			ListenerPoolConfig: xnet.TCPPoolConfig{
-				PoolSize:           2,
+				PoolSize:           4,
 				QueueSize:          4,
 				TxBufSize:          4096,
 				RxBufSize:          1024,
@@ -134,7 +135,7 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 			},
 		})
 
-		n.berkeley = *xnet.NewBerkeleyStack(gostack.Socket)
+		n.berkeley = *xnet.NewBerkeleyStack(n.gostack.Socket)
 		go handleStack(espstack)
 	})
 	_, err = n.netstack.SetupWithDHCP(espradio.DHCPConfig{})
@@ -146,6 +147,8 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 	}
 	return nil
 }
+
+func (n *Esplink) StackGo() xnet.StackGo { return n.gostack }
 
 // NetDisconnect device from network
 func (n *Esplink) NetDisconnect() {
