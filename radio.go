@@ -483,19 +483,60 @@ func ArenaStats() (used, capacity uint32) {
 	return uint32(u), uint32(c)
 }
 
-// wifiEnabled guards Enable against a second call.  Re-running it would
-// re-initialise the arena under the blob's live pointers, start a second ticker
-// goroutine and re-register the ISR.
+// Enable state, held in wifiEnabled.
+//
+// The transition off -> on is a CAS, and it does double duty: it rejects a second
+// Enable, and it excludes a concurrent one.  Both matter.  Re-running Enable
+// would re-register the ISR and re-enter blob init, and Enable yields partway
+// through -- the ticker settle below is a real scheduling point under cooperative
+// scheduling -- so a second caller can arrive mid-init.  Both NetConnect and the
+// AP path call Enable, so that is not hypothetical.  Latching the state only on
+// success would leave that window open, which is why the CAS stays at the top.
+//
+// wifiStateFailed exists because Enable cannot be retried.  By the time the blob
+// init below can fail, the ISR tables are zeroed, the arena is laid out, the
+// ticker goroutine is running with no way to stop it, the CPU interrupt is
+// registered and prioritised, the interrupt routing is prewired, the event
+// callback is registered and the HAL clocks are up.  None of that has teardown
+// code, and there is no esp_wifi_deinit binding to put the blob back either.  So
+// the failure is terminal, and the state records that rather than pretending the
+// radio is merely already enabled.
+const (
+	wifiStateOff uint32 = iota
+	wifiStateOn
+	wifiStateFailed
+)
+
 var wifiEnabled uint32
 
 // ErrAlreadyEnabled is returned by Enable when the radio is already enabled.
 var ErrAlreadyEnabled = errors.New("espradio: radio already enabled")
 
+// ErrEnableFailed is returned by Enable when an earlier call to it failed.  That
+// failure is not recoverable in software: the driver has no teardown path, so the
+// device has to be reset before the radio can be brought up again.
+var ErrEnableFailed = errors.New("espradio: earlier Enable failed, reset required")
+
+// enableFailed marks the Enable state terminal on the way out.  Every error
+// return in Enable goes through it, so a caller that retries gets
+// ErrEnableFailed rather than the misleading ErrAlreadyEnabled.  A package-level
+// function rather than a closure inside Enable: nothing in the driver's init path
+// should allocate when it does not have to.
+func enableFailed(err error) error {
+	atomic.StoreUint32(&wifiEnabled, wifiStateFailed)
+	return err
+}
+
 // Enable and configure the radio for WiFi.
 //
-// Enable is not idempotent and returns ErrAlreadyEnabled on a second call.
+// Enable is not idempotent and returns ErrAlreadyEnabled on a second call.  If an
+// earlier call failed, every later one returns ErrEnableFailed: a partially
+// initialised radio cannot be unwound, so the device must be reset.
 func Enable(config Config) error {
-	if !atomic.CompareAndSwapUint32(&wifiEnabled, 0, 1) {
+	if !atomic.CompareAndSwapUint32(&wifiEnabled, wifiStateOff, wifiStateOn) {
+		if atomic.LoadUint32(&wifiEnabled) == wifiStateFailed {
+			return ErrEnableFailed
+		}
 		return ErrAlreadyEnabled
 	}
 
@@ -521,7 +562,11 @@ func Enable(config Config) error {
 		startSchedTicker()
 	}
 	time.Sleep(schedTickerMs * time.Millisecond)
-	initHardware()
+	// Checked rather than discarded, matching BLEInit.  Every target returns nil
+	// today, so this is a guard against a future one that does not.
+	if err := initHardware(); err != nil {
+		return enableFailed(err)
+	}
 	C.espradio_ensure_osi_ptr()
 
 	wifiISR = interrupt.New(wifiCPUInterrupt, wifiISRHandler)
@@ -539,7 +584,7 @@ func Enable(config Config) error {
 
 	errCode := C.espradio_wifi_init()
 	if errCode != 0 {
-		return makeError(errCode)
+		return enableFailed(makeError(errCode))
 	}
 	C.espradio_wifi_init_completed()
 	C.espradio_wifi_int_to_level()
