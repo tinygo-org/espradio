@@ -177,7 +177,6 @@ func main() {
 	var router httphi.Router
 	err = router.Configure(httphi.RouterConfig{
 		FixedNumGoroutines:          maxConns,
-		MaxAwaitingConns:            maxConns,
 		RequestHeaderBufferSize:     reqHeaderBuf,
 		ResponseHeaderMinBufferSize: respHeaderBuf,
 		RequestNumHeaderKVCap:       numHeaderFields,

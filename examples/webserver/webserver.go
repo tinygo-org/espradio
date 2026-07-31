@@ -73,8 +73,7 @@ func main() {
 		FixedNumGoroutines:          4,
 		RequestHeaderBufferSize:     1024, // Google chrome requests are around 700 bytes in header size.
 		ResponseHeaderMinBufferSize: 128,  // We won't be writing too much to headers. Unused request memory is reused on top of this.
-		RequestNumHeaderKVCap:       16,   //
-		MaxAwaitingConns:            4,
+		RequestNumHeaderKVCap:       16,   // Max number of headers we can expect.
 		Mux:                         &http,
 	})
 	if err != nil {
@@ -149,6 +148,7 @@ func cnt(exch *httphi.Exchange) {
 		if len(c) > 0 {
 			i64, _ := strconv.ParseInt(string(c), 0, 0)
 			counter = int(i64)
+			println("set counter", counter)
 		}
 	}
 	json := append(scratch[:0], `{"cnt": `...)
