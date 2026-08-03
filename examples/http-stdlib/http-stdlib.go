@@ -17,7 +17,6 @@ var (
 )
 
 func main() {
-	// use ESP32 radio
 	link := link.Esplink{}
 	netdev.UseNetdev(&link)
 

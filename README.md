@@ -23,7 +23,7 @@ Bluetooth is in progress, along with more processors.
 - Raw Ethernet frame send/receive
 - MQTT client support (uses [`natiu-mqtt`](https://github.com/soypat/natiu-mqtt))
 - QEMU simulation target for ESP32-C3
-- Heapless HTTP/1.1 server that allocates nothing per request (uses [`httphi`](https://github.com/soypat/lneto/tree/main/http/httphi)). See the [http-no-allocs](./examples/README.md#http-no-allocs) and [http-no-allocs-static](./examples/README.md#http-no-allocs-static) examples.
+- Heapless HTTP/1.1 server that allocates nothing per request (uses [`httphi`](https://github.com/soypat/lneto/tree/main/http/httphi)). See the [http-hello](./examples/README.md#http-hello) and [webserver](./examples/README.md#webserver) examples.
 - `net/http` availability for HTTP/2 support and compatibility with other projects. Note: We strongly recommend using `httphi` instead of `net/http` for long running programs. See [examples README](./examples/README.md#http-stdlib).
 
 ## Getting started with HTTP `hello` example
@@ -31,7 +31,6 @@ We can start a basic HTTP webserver on the [Seeed Studio XIAO-ESP32C3](https://w
 
 ```go
 func main() {
-	// use ESP32 radio
 	link := &link.Esplink{}
 	netdev.UseNetdev(link)
 
@@ -49,7 +48,6 @@ func main() {
 	var router httphi.Router
 	cfg := httphi.DefaultRouterConfig(4, 2048, http.MaxPathValues())
 	failIfErr("configuring Router", router.Configure(&http, cfg))
-	defer router.Shutdown() // Despawns goroutines.
 	err := link.ListenAndServe(&router, port)
 	failIfErr("Esplink.ListenAndServe", err)
 }

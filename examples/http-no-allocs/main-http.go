@@ -157,9 +157,6 @@ func main() {
 		failure("listener register: " + err.Error())
 	}
 
-	// The mux resolves method+path to the handler serving it. Paths are matched
-	// exactly and the query string is the handler's business, so
-	// "/toggle-led?callsign=pato" lands on handleToggleLED. Anything else is 404.
 	var mux httphi.MuxSlice
 	var server Server
 	server.InitAndRegister(&mux)
@@ -209,9 +206,7 @@ type Server struct {
 	scratchPool sync.Pool
 }
 
-// scratch holds the work buffers a handler needs beyond the exchange's own
-// memory. One is checked out per request instead of declaring the buffers as
-// locals, which TinyGo would escape to the heap on every request.
+// scratch holds the work buffers a handler needs for form, cookie, query parsing.
 type scratch struct {
 	dyn [1024]byte // Rendered action list, sized so append never grows it.
 }
@@ -246,16 +241,9 @@ func (sv *Server) handleLanding(exch *httphi.Exchange) {
 
 func (sv *Server) handleToggleLED(exch *httphi.Exchange) {
 	println("got toggle led request")
-	scratch := sv.scratchPool.Get().(*scratch)
-	defer sv.scratchPool.Put(scratch)
-
-	// The raw view aliases the exchange buffer, no copy needed: sanitizeCallsign
-	// stops at the first non-letter, so a percent escape ends the callsign.
 	rawCallsign, _ := exch.RequestQueryValue("callsign")
-	sv.state.RecordToggle(sanitizeCallsign(scratch.dyn[:0], rawCallsign))
-	exch.StageHeader("Content-Length", "0")
-	exch.StageHeader("Connection", "close")
-	exch.WriteHeader(httphi.StatusOK)
+	sv.state.RecordToggle(sanitizeCallsign(rawCallsign))
+	exch.Respond(httphi.StatusOK, "", nil)
 }
 
 // ServerState stores the state of the HTTP server. It has a ring buffer with last 8 actions
@@ -275,6 +263,9 @@ type Action struct {
 }
 
 func (s *ServerState) RecordToggle(callsign []byte) {
+	if len(callsign) == 0 {
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.LEDState = !s.LEDState
@@ -337,21 +328,16 @@ func appendDurationAgo(dst []byte, d time.Duration) []byte {
 	return dst
 }
 
-func sanitizeCallsign(dst, raw []byte) []byte {
-	dst = dst[:0]
-	for _, b := range raw {
-		if (b < 'A' || b > 'Z') && (b < 'a' || b > 'z') {
-			break
-		}
-		dst = append(dst, b)
-		if len(dst) >= 4 {
-			break
+func sanitizeCallsign(raw []byte) []byte {
+	const maxCallsignLength = 4
+	for i, b := range raw {
+		isAlpha := b >= 'A' && b <= 'Z' || b >= 'a' && b <= 'z'
+		validChar := isAlpha || b == '.'
+		if i >= maxCallsignLength || !validChar {
+			return raw[:i]
 		}
 	}
-	if len(dst) == 0 {
-		dst = append(dst, "(unknown)"...)
-	}
-	return dst
+	return raw
 }
 
 // addrBuf formats remote addresses in printIncoming. Only the accept loop uses it.

@@ -16,7 +16,6 @@ var (
 )
 
 func main() {
-	// use ESP32 radio
 	link := &link.Esplink{}
 	netdev.UseNetdev(link)
 
@@ -29,7 +28,7 @@ func main() {
 	println("Connected to WiFi.")
 	var http httphi.MuxSlice
 	http.Handle("/", func(exch *httphi.Exchange) {
-		exch.RespondString(200, "application/json", `{"message":"hello"}`)
+		exch.RespondString(httphi.StatusOK, "application/json", `{"message":"hello"}`)
 	})
 	var router httphi.Router
 	cfg := httphi.DefaultRouterConfig(4, 2048, http.MaxPathValues())

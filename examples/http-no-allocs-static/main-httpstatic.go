@@ -144,8 +144,6 @@ func main() {
 		failure("listener register: " + err.Error())
 	}
 
-	// The mux resolves method+path to the handler serving it, paths matched
-	// exactly. Anything not registered below is answered 404 by the router.
 	var mux httphi.MuxSlice
 	var server Server
 	server.InitAndRegister(&mux)
@@ -206,18 +204,7 @@ func (sv *Server) InitAndRegister(mux *httphi.MuxSlice) {
 
 func (sv *Server) handleLanding(exch *httphi.Exchange) {
 	println("Got webpage request!")
-	exch.StageHeader("Content-Type", "text/html")
-	exch.StageHeaderInt("Content-Length", int64(len(webPage)))
-	// The router serves one exchange per connection and then closes it. Saying so
-	// avoids notably slower paint times in the browser. Content-Length above is
-	// what keeps the browser from treating the close as a truncated page.
-	exch.StageHeader("Connection", "close")
-	exch.WriteHeader(httphi.StatusOK)
-	_, err := exch.WriteBody(webPage)
-	if err != nil {
-		println("writing body:", err.Error())
-	}
-	time.Sleep(pollTime)
+	exch.Respond(httphi.StatusOK, "text/html", webPage)
 }
 
 func (sv *Server) handleToggleLED(exch *httphi.Exchange) {
@@ -226,10 +213,7 @@ func (sv *Server) handleToggleLED(exch *httphi.Exchange) {
 	sv.ledState = !sv.ledState
 	setLED(sv.ledState)
 	sv.mu.Unlock()
-
-	exch.StageHeader("Content-Length", "0")
-	exch.StageHeader("Connection", "close")
-	exch.WriteHeader(httphi.StatusOK)
+	exch.Respond(httphi.StatusOK, "", nil)
 }
 
 func loopForeverStack(stack *espradio.Stack) {

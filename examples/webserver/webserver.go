@@ -16,23 +16,16 @@ import (
 	link "tinygo.org/x/espradio/netlink"
 )
 
-// Pages are embedded as bytes so serving them needs no string conversion,
-// which would copy the page to the heap on every request.
-
 //go:embed index.html
 var indexHTML string
 
 //go:embed sixlines.html
 var sixlinesHTML string
 
-// Stores []byte buffers to avoid allocations in HTTP handlers.
-var scratchPool sync.Pool
+var scratchPool sync.Pool // Stores []byte buffers to avoid allocations in HTTP handlers.
 
 const scratchSize = 128
-
-const (
-	port uint16 = 80
-)
+const port uint16 = 80 // HTTP listening port.
 
 var (
 	ssid     string
@@ -81,25 +74,27 @@ func logRequest(h httphi.HandlerFunc) httphi.HandlerFunc {
 }
 
 func root(exch *httphi.Exchange) {
-	exch.RespondString(200, "text/html", indexHTML)
+	exch.RespondString(httphi.StatusOK, "text/html", indexHTML)
 }
 
 func sixlines(exch *httphi.Exchange) {
-	exch.RespondString(200, "text/html", indexHTML)
+	exch.RespondString(httphi.StatusOK, "text/html", indexHTML)
 }
+
+const textplain = "text/plain; charset=UTF-8"
 
 func LED_ON(exch *httphi.Exchange) {
 	setLED(true)
-	exch.RespondString(200, "text/plain; charset=UTF-8", "led.High()")
+	exch.RespondString(httphi.StatusOK, textplain, "led.High()")
 }
 
 func LED_OFF(exch *httphi.Exchange) {
 	setLED(false)
-	exch.RespondString(200, "text/plain; charset=UTF-8", "led.Low()")
+	exch.RespondString(httphi.StatusOK, textplain, "led.Low()")
 }
 
 func hello(exch *httphi.Exchange) {
-	exch.RespondString(200, "text/plain; charset=UTF-8", "hello")
+	exch.RespondString(httphi.StatusOK, textplain, "hello")
 }
 
 var counter int
@@ -114,7 +109,7 @@ func cnt(exch *httphi.Exchange) {
 		const parseURL, prioritizeURL = true, false
 		err := exch.RequestParseForm(&form, parseURL, prioritizeURL)
 		if err != nil {
-			exch.Respond(500, "", nil)
+			exch.Respond(httphi.StatusInternalServerError, "", nil)
 			return
 		}
 		c := form.Get("cnt")
@@ -127,7 +122,7 @@ func cnt(exch *httphi.Exchange) {
 	json := append(scratch[:0], `{"cnt": `...)
 	json = strconv.AppendInt(json, int64(counter), 10)
 	json = append(json, '}')
-	exch.Respond(200, "application/json", json)
+	exch.Respond(httphi.StatusOK, "application/json", json)
 }
 
 func failIfErr(action string, err error) {

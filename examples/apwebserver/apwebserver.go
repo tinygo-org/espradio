@@ -19,9 +19,6 @@ import (
 	link "tinygo.org/x/espradio/netlink"
 )
 
-// Pages are embedded as bytes so serving them needs no string conversion,
-// which would copy the page to the heap on every request.
-
 //go:embed index.html
 var indexHTML string
 
@@ -57,14 +54,12 @@ func main() {
 	}))
 
 	var http httphi.MuxSlice
+	http.Handle("/", logRequest(root))
 	http.Handle("/hello", logRequest(hello))
 	http.Handle("/cnt", logRequest(cnt))
 	http.Handle("/6", logRequest(sixlines))
 	http.Handle("/off", logRequest(LED_OFF))
 	http.Handle("/on", logRequest(LED_ON))
-	// A trailing slash is an anonymous wildcard, so "/" matches every path.
-	// Registered last it serves what the paths above did not claim.
-	http.Handle("/", logRequest(root))
 
 	const maxConns, httpMemoryPerConn = 4, 2048
 	var router httphi.Router
@@ -86,29 +81,29 @@ func logRequest(h httphi.HandlerFunc) httphi.HandlerFunc {
 }
 
 func root(exch *httphi.Exchange) {
-	exch.RespondString(200, "text/html", indexHTML)
+	exch.RespondString(httphi.StatusOK, "text/html", indexHTML)
 }
 
 func sixlines(exch *httphi.Exchange) {
-	exch.RespondString(200, "text/html", sixlinesHTML)
+	exch.RespondString(httphi.StatusOK, "text/html", sixlinesHTML)
 }
+
+const textplain = "text/plain; charset=UTF-8"
 
 func LED_ON(exch *httphi.Exchange) {
 	setLED(true)
-	exch.RespondString(200, "text/plain; charset=UTF-8", "led.High()")
+	exch.RespondString(httphi.StatusOK, textplain, "led.High()")
 }
 
 func LED_OFF(exch *httphi.Exchange) {
 	setLED(false)
-	exch.RespondString(200, "text/plain; charset=UTF-8", "led.Low()")
+	exch.RespondString(httphi.StatusOK, textplain, "led.Low()")
 }
 
 func hello(exch *httphi.Exchange) {
-	exch.RespondString(200, "text/plain; charset=UTF-8", "hello")
+	exch.RespondString(httphi.StatusOK, textplain, "hello")
 }
 
-// counter is read and written from the router's goroutines, so several clients
-// may be inside cnt at once.
 var counter atomic.Int64
 
 func cnt(exch *httphi.Exchange) {
@@ -120,12 +115,11 @@ func cnt(exch *httphi.Exchange) {
 		const parseURL, prioritizeURL = true, false
 		err := exch.RequestParseForm(&form, parseURL, prioritizeURL)
 		if err != nil {
-			exch.Respond(500, "", nil)
+			exch.Respond(httphi.StatusInternalServerError, "", nil)
 			return
 		}
 		c := form.Get("cnt")
 		if len(c) > 0 {
-			// Parsed before the form's memory is reused for the response below.
 			i64, _ := strconv.ParseInt(string(c), 0, 0)
 			counter.Store(i64)
 			println("set counter", i64)
@@ -134,7 +128,7 @@ func cnt(exch *httphi.Exchange) {
 	json := append(scratch[:0], `{"cnt": `...)
 	json = strconv.AppendInt(json, counter.Load(), 10)
 	json = append(json, '}')
-	exch.Respond(200, "application/json", json)
+	exch.Respond(httphi.StatusOK, "application/json", json)
 }
 
 func failIfErr(action string, err error) {
