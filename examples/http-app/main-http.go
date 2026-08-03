@@ -38,23 +38,13 @@ var (
 )
 
 const (
-	ntpHost    = "pool.ntp.org"
-	pollTime   = 5 * time.Millisecond
-	maxConns   = 4
-	listenPort = 80
-
-	// reqHeaderBuf bounds the request header. The router refuses to grow it, so
-	// a request whose header does not fit is answered 431 instead of eating memory.
-	reqHeaderBuf = 1024
-	// respHeaderBuf is the room for staged response header fields. The status
-	// line does not count towards it and unused request memory is reused.
-	respHeaderBuf = 128
-	// numHeaderFields is how many request header fields are parsed before
-	// answering 431. A browser sends around twenty. Each field costs 8 bytes.
-	numHeaderFields = 32
-	// connDeadline fails the reads/writes of a peer that opens a connection and
-	// then stalls, instead of it holding a router goroutine forever.
-	connDeadline = 8 * time.Second
+	ntpHost        = "pool.ntp.org"
+	pollTime       = 5 * time.Millisecond
+	maxConns       = 4
+	kB             = 1 << 10 // kilobyte
+	httpConnMemory = 4 * kB
+	listenPort     = 80
+	connDeadline   = 8 * time.Second
 
 	templateActionMarker = "<!--A-->"
 )
@@ -175,13 +165,8 @@ func main() {
 	server.InitAndRegister(&mux)
 	// Router allocates its exchanges and goroutines here and never again.
 	var router httphi.Router
-	err = router.Configure(httphi.RouterConfig{
-		FixedNumGoroutines:          maxConns,
-		RequestHeaderBufferSize:     reqHeaderBuf,
-		ResponseHeaderMinBufferSize: respHeaderBuf,
-		RequestNumHeaderKVCap:       numHeaderFields,
-		Mux:                         &mux,
-	})
+	cfg := httphi.DefaultRouterConfig(maxConns, httpConnMemory, mux.MaxPathValues())
+	err = router.Configure(&mux, cfg)
 	if err != nil {
 		failure("router configure: " + err.Error())
 	}

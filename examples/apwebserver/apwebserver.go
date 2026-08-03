@@ -60,24 +60,20 @@ func main() {
 		PassivePeers:     64,
 	}))
 
-	var mux httphi.MuxSlice
-	mux.Handle("/hello", logRequest(hello))
-	mux.Handle("/cnt", logRequest(cnt))
-	mux.Handle("/6", logRequest(sixlines))
-	mux.Handle("/off", logRequest(LED_OFF))
-	mux.Handle("/on", logRequest(LED_ON))
+	var http httphi.MuxSlice
+	http.Handle("/hello", logRequest(hello))
+	http.Handle("/cnt", logRequest(cnt))
+	http.Handle("/6", logRequest(sixlines))
+	http.Handle("/off", logRequest(LED_OFF))
+	http.Handle("/on", logRequest(LED_ON))
 	// A trailing slash is an anonymous wildcard, so "/" matches every path.
 	// Registered last it serves what the paths above did not claim.
-	mux.Handle("/", logRequest(root))
+	http.Handle("/", logRequest(root))
 
+	const maxConns, httpMemoryPerConn = 4, 2048
 	var router httphi.Router
-	failIfErr("configuring Router", router.Configure(httphi.RouterConfig{
-		FixedNumGoroutines:          4,
-		RequestHeaderBufferSize:     1024, // Google chrome requests are around 700 bytes in header size.
-		ResponseHeaderMinBufferSize: 128,  // We won't be writing too much to headers. Unused request memory is reused on top of this.
-		RequestNumHeaderKVCap:       16,   // Max number of headers we can expect.
-		Mux:                         &mux,
-	}))
+	cfg := httphi.DefaultRouterConfig(maxConns, httpMemoryPerConn, http.MaxPathValues())
+	failIfErr("configuring Router", router.Configure(&http, cfg))
 	defer router.Shutdown() // Despawns goroutines.
 
 	listener, err := Listen(lnk, port)

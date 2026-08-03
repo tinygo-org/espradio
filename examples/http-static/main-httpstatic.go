@@ -30,9 +30,11 @@ var (
 )
 
 const (
-	pollTime   = 5 * time.Millisecond
-	maxConns   = 4
-	listenPort = 80
+	pollTime       = 5 * time.Millisecond
+	maxConns       = 4
+	kB             = 1 << 10 // kilobyte
+	httpConnMemory = 2 * kB
+	listenPort     = 80
 
 	// reqHeaderBuf bounds the request header. The router refuses to grow it, so
 	// a request whose header does not fit is answered 431 instead of eating memory.
@@ -149,13 +151,8 @@ func main() {
 	server.InitAndRegister(&mux)
 	// Router allocates its exchanges and goroutines here and never again.
 	var router httphi.Router
-	err = router.Configure(httphi.RouterConfig{
-		FixedNumGoroutines:          maxConns,
-		RequestHeaderBufferSize:     reqHeaderBuf,
-		ResponseHeaderMinBufferSize: respHeaderBuf,
-		RequestNumHeaderKVCap:       numHeaderFields,
-		Mux:                         &mux,
-	})
+	cfg := httphi.DefaultRouterConfig(maxConns, httpConnMemory, mux.MaxPathValues())
+	err = router.Configure(&mux, cfg)
 	if err != nil {
 		failure("router configure: " + err.Error())
 	}

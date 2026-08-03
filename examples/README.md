@@ -170,16 +170,21 @@ boot, then flash both.
 tinygo flash -target xiao-esp32c3 -monitor ./examples/espnow
 ```
 
+
 ### http-stdlib
-Use the standard library net/http package for hosting a HTTP server.
+Use the standard library net/http package for hosting a HTTP2 capable server. 
+
+| ⚠️ User note |
+|---|
+| The net/http package was not designed for use on embedded systems. Every connection allocates 10kB on the Go heap. This means the garbage collector will run every 40 requests (in the best of cases). TinyGo's GC does not handle memory fragmentation well and your entire program will likely crash after a while. Prefer using the `httphi` library shown in the other examples. |
+
 ```
 tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=yourssid -X main.password=yourpassword" -size short -monitor ./examples/http-stdlib
 ```
 
 ### http-get
 
-Fetches a URL with `http.Get()`.
-
+Fetches a URL with `http.Get()`. This uses the net/http package which has allocation issues. Refer to warning above.
 ```
 tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=yourssid -X main.password=yourpassword" -size short -monitor ./examples/http-get
 ```

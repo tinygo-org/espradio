@@ -19,11 +19,12 @@ Bluetooth is in progress, along with more processors.
 - ESP-NOW peer-to-peer messaging, no access point or TCP/IP needed
 - Go stdlib `net` support using the TinyGo `netdev`/`netlink` interface
 - Pure-Go TCP/IP stack with DHCP, DNS, and NTP (uses [`lneto`](https://github.com/soypat/lneto))
-- Heapless HTTP/1.1 server that allocates nothing per request (uses [`httphi`](https://github.com/soypat/lneto/tree/main/http/httphi))
+- Heapless HTTP/1.1 server that allocates nothing per request (uses [`httphi`](https://github.com/soypat/lneto/tree/main/http/httphi)). See examples []
 - TCP and UDP Berkeley sockets API
 - Raw Ethernet frame send/receive
 - MQTT client support (uses [`natiu-mqtt`](https://github.com/soypat/natiu-mqtt))
 - QEMU simulation target for ESP32-C3
+- net/http availability for HTTP/2 support. Not recommended for long running programs. See [examples README](./examples/README.md#http-stdlib).
 
 ## Getting started with HTTP `hello` example
 We can start a basic HTTP webserver on the [Seeed Studio XIAO-ESP32C3](https://www.seeedstudio.com/Seeed-XIAO-ESP32C3-p-5431.html) using espradio along with the lightweight [`httphi`](https://github.com/soypat/lneto/tree/main/http/httphi) library using the code below. See [the example for all the code](./examples/http-hello/main.go):
@@ -46,13 +47,8 @@ func main() {
 		exch.RespondString(200, "application/json", `{"message":"hello"}`)
 	})
 	var router httphi.Router
-	failIfErr("configuring Router", router.Configure(httphi.RouterConfig{
-		FixedNumGoroutines:          4,
-		RequestHeaderBufferSize:     1024, // Google chrome requests are around 700 bytes in header size.
-		ResponseHeaderMinBufferSize: 128,  // We won't be writing too much to headers. Unused request memory is reused on top of this.
-		RequestNumHeaderKVCap:       16,   // Max number of headers we can expect.
-		Mux:                         &http,
-	}))
+	cfg := httphi.DefaultRouterConfig(maxConns, httpMemoryPerConn, http.MaxPathValues())
+	failIfErr("configuring Router", router.Configure(&http, cfg))
 	defer router.Shutdown() // Despawns goroutines.
 	listener, err := Listen(link, port)
 	failIfErr("listening to port", err)
@@ -69,7 +65,6 @@ func main() {
 		}
 	}
 }
-
 ```
 
 Upload your program to the ESP32 using TinyGo as follows. You'll need to change the command below for the next steps:
