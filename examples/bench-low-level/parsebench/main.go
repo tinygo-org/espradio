@@ -595,30 +595,55 @@ func join(r *run) ([]joined, float64, bool) {
 	return out, score, true
 }
 
-// bestOffset slides host against dev and returns the shift with the highest
-// normalised correlation.
+// bestOffset slides host against dev and returns the shift where the two packet
+// counts agree best.
+//
+// Two things have to be got right or the search lands on a spurious alignment
+// that scores perfectly.  The statistic is Pearson, not cosine: both series are
+// strictly positive and hover around the same value, so an un-centred cosine sits
+// near 1.0 for every offset and discriminates nothing.  And the score is scaled
+// by how much of the run the overlap covers, because at the extremes only a
+// handful of bins overlap and any two short positive runs correlate -- a
+// three-bin overlap will happily report 1.000 and throw the whole join away.
 func bestOffset(dev, host []float64) (int, float64) {
-	best, bestScore := 0, -2.0
-	lo, hi := -len(host), len(host)
-	for off := lo; off <= hi; off++ {
-		var sxy, sxx, syy float64
+	shorter := min(len(dev), len(host))
+	minOverlap := max(10, shorter/4)
+	pairs := func(off int, f func(a, b float64)) int {
 		var n int
 		for i := range dev {
 			k := i + off
 			if k < 0 || k >= len(host) {
 				continue
 			}
-			sxy += dev[i] * host[k]
-			sxx += dev[i] * dev[i]
-			syy += host[k] * host[k]
+			f(dev[i], host[k])
 			n++
 		}
-		if n < 3 || sxx == 0 || syy == 0 {
+		return n
+	}
+
+	best, bestScore := 0, -2.0
+	for off := -len(host); off <= len(host); off++ {
+		var sx, sy float64
+		n := pairs(off, func(a, b float64) { sx, sy = sx+a, sy+b })
+		if n < minOverlap {
 			continue
 		}
-		if s := sxy / sqrt(sxx*syy); s > bestScore {
-			best, bestScore = off, s
+		mx, my := sx/float64(n), sy/float64(n)
+		var sxy, sxx, syy float64
+		pairs(off, func(a, b float64) {
+			a, b = a-mx, b-my
+			sxy, sxx, syy = sxy+a*b, sxx+a*a, syy+b*b
+		})
+		if sxx == 0 || syy == 0 {
+			continue
 		}
+		score := sxy / sqrt(sxx*syy) * (float64(n) / float64(shorter))
+		if score > bestScore {
+			best, bestScore = off, score
+		}
+	}
+	if bestScore < -1 {
+		return 0, 0 // nothing overlapped enough to judge
 	}
 	return best, bestScore
 }
