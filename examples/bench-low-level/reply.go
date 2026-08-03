@@ -122,11 +122,11 @@ func arpReply(buf []byte, n int) int {
 	copy(buf[0:6], buf[6:12]) // reply goes back to whoever asked
 	copy(buf[6:12], ourMAC[:])
 
-	a[7] = 2                  // oper 2 = reply
-	copy(a[18:24], a[8:14])   // target hardware = old sender hardware
-	copy(a[24:28], a[14:18])  // target protocol = old sender protocol
-	copy(a[8:14], ourMAC[:])  // sender hardware = us
-	copy(a[14:18], ourIP[:])  // sender protocol = us
+	a[7] = 2                 // oper 2 = reply
+	copy(a[18:24], a[8:14])  // target hardware = old sender hardware
+	copy(a[24:28], a[14:18]) // target protocol = old sender protocol
+	copy(a[8:14], ourMAC[:]) // sender hardware = us
+	copy(a[14:18], ourIP[:]) // sender protocol = us
 	return pad(buf, ethHdrLen+arpLen)
 }
 
