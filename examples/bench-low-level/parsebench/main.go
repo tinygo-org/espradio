@@ -307,6 +307,12 @@ func summarize(r *run) []metric {
 			add(mNum("ping", "rtt p99.9", p999, fmtMS, -1))
 			add(mNum("ping", "rtt max", mx, fmtMS, -1))
 		}
+		// Flood mode reports the gap it actually achieved.  Without it there is
+		// nothing in the log to say whether -i was honoured -- and at short
+		// intervals it is not.
+		if v, ok := p.rtt["ipg"]; ok {
+			add(mNum("ping", "send gap", v, fmtMS, 0))
+		}
 		if v, ok := p.rtt["mdev"]; ok {
 			add(mNum("ping", "rtt mdev", v, fmtMS, -1))
 		} else if v, ok := p.rtt["stddev"]; ok {

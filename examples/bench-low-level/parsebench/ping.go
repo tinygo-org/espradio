@@ -48,6 +48,14 @@ type pingLog struct {
 	delayed int
 	maxSeq  int
 
+	// icmp_seq is 16 bits, so a run past 65,535 packets restarts it -- these two
+	// runs wrapped three and four times.  Left wrapped, a packet lost before a
+	// wrap is cancelled out by a different packet answered after one, and any
+	// count derived from the sequence caps at 65,535.
+	prevRaw int
+	wraps   int
+	seenSeq bool
+
 	// Straight from the trailer, when the run was allowed to finish.
 	sent, recv int
 	lossPct    float64
@@ -132,7 +140,8 @@ func (p *pingLog) scanReply(fields []string) {
 		}
 		switch k {
 		case "icmp_seq", "seq":
-			s.seq, _ = strconv.Atoi(v)
+			n, _ := strconv.Atoi(v)
+			s.seq = p.unwrap(n)
 		case "time":
 			// The unit is either fused to the number or the next token.
 			num, unit := splitUnit(v)
@@ -157,7 +166,8 @@ func (p *pingLog) scanLoss(fields []string) {
 			continue
 		}
 		if k, v, ok := strings.Cut(t, "="); ok && (k == "icmp_seq" || k == "seq") {
-			s.seq, _ = strconv.Atoi(v)
+			n, _ := strconv.Atoi(v)
+			s.seq = p.unwrap(n)
 		}
 	}
 	p.pending = append(p.pending, s)
@@ -188,29 +198,61 @@ func (p *pingLog) scanTrailer(fields []string) {
 	}
 }
 
-// scanRTT zips the slash-separated labels onto the slash-separated values, so it
-// does not care whether the fourth statistic is called mdev or stddev, nor how
-// many there are.
+// scanRTT zips slash-separated labels onto slash-separated values wherever the
+// line pairs them, rather than keying off the "=".  The trailer carries more than
+// one such group and which ones depends on the mode ping ran in:
+//
+//	rtt min/avg/max/mdev = 2.271/11.464/329.064/17.915 ms, pipe 26
+//	rtt min/avg/max/mdev = 0.004/0.038/0.133/0.031 ms, ipg/ewma 4.995/0.043 ms
+//
+// ipg is the achieved inter-packet gap, and so the only direct evidence in the
+// log that the interval asked for is the interval that was sent at.
 func (p *pingLog) scanRTT(fields []string) {
-	var labels, values string
 	for i, t := range fields {
-		if t != "=" || i == 0 || i+1 >= len(fields) {
+		if !slashLabels(t) {
 			continue
 		}
-		labels, values = fields[i-1], fields[i+1]
-	}
-	if labels == "" {
-		return
-	}
-	ls, vs := strings.Split(labels, "/"), strings.Split(strings.TrimSuffix(values, ","), "/")
-	if len(ls) != len(vs) {
-		return
-	}
-	for i, l := range ls {
-		if f, err := strconv.ParseFloat(vs[i], 64); err == nil {
-			p.rtt[l] = f
+		// The values follow the labels either immediately or across an "=".
+		for j := i + 1; j < len(fields) && j <= i+2; j++ {
+			if !slashValues(fields[j]) {
+				continue
+			}
+			ls := strings.Split(t, "/")
+			vs := strings.Split(strings.TrimSuffix(fields[j], ","), "/")
+			if len(ls) != len(vs) {
+				break
+			}
+			for k, l := range ls {
+				if f, err := strconv.ParseFloat(vs[k], 64); err == nil {
+					p.rtt[l] = f
+				}
+			}
+			break
 		}
 	}
+}
+
+func slashLabels(s string) bool {
+	return strings.Contains(s, "/") && strings.IndexFunc(s, isDigit) < 0
+}
+
+func slashValues(s string) bool {
+	s = strings.TrimSuffix(s, ",")
+	return strings.Contains(s, "/") && s != "" && isDigit(rune(s[0]))
+}
+
+func isDigit(r rune) bool { return r >= '0' && r <= '9' }
+
+// unwrap turns a 16-bit icmp_seq into a monotonic one.  Replies and -O lines
+// interleave, so the sequence steps backwards by a few in normal operation; only
+// a fall of most of the range is a wrap.
+func (p *pingLog) unwrap(raw int) int {
+	const period = 1 << 16
+	if p.seenSeq && raw < p.prevRaw-period/2 {
+		p.wraps++
+	}
+	p.prevRaw, p.seenSeq = raw, true
+	return raw + p.wraps*period
 }
 
 // numBefore walks back from a label to its value.  "180418 packets transmitted"
