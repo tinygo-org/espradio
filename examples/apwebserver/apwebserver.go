@@ -7,10 +7,7 @@
 package main
 
 import (
-	"context"
 	_ "embed"
-	"errors"
-	"net"
 	"net/netip"
 	"strconv"
 	"sync/atomic"
@@ -18,7 +15,6 @@ import (
 
 	"github.com/soypat/lneto/http/httphi"
 	"github.com/soypat/lneto/http/httpraw"
-	"github.com/soypat/lneto/x/xnet"
 	"tinygo.org/x/espradio"
 	link "tinygo.org/x/espradio/netlink"
 )
@@ -35,7 +31,7 @@ var sixlinesHTML string
 var (
 	ssid     string
 	password string
-	port     string = ":80"
+	port     uint16 = 80
 )
 
 const apIP = "192.168.4.1"
@@ -76,19 +72,8 @@ func main() {
 	failIfErr("configuring Router", router.Configure(&http, cfg))
 	defer router.Shutdown() // Despawns goroutines.
 
-	listener, err := Listen(lnk, port)
-	failIfErr("listening to port", err)
-	defer listener.Close()
-	println("HTTP server listening on http://" + apIP + port)
-	for {
-		conn, err := listener.Accept()
-		failIfErr("accepting conn", err)
-		err = router.Handle(conn)
-		if err != nil {
-			conn.Close()
-			println("failed to handle connection: ", err.Error())
-		}
-	}
+	err := lnk.ListenAndServe(&router, port) // Blocks as long as Router can serve connections.
+	failIfErr("Esplink.ListenAndServe", err)
 }
 
 func logRequest(h httphi.HandlerFunc) httphi.HandlerFunc {
@@ -155,23 +140,4 @@ func failIfErr(action string, err error) {
 		println("fail " + action + ": " + err.Error())
 		time.Sleep(1 * time.Second)
 	}
-}
-
-func Listen(lnk *link.Esplink, port string) (net.Listener, error) {
-	// Listen by asking the lneto stack for a socket directly instead of going
-	// through stdlib net.Listen and the netdev file descriptor layer due to a bug.
-	stack := lnk.StackGo()
-	laddr, err := netip.ParseAddrPort("0.0.0.0" + port)
-	if err != nil {
-		return nil, err
-	}
-	sock, err := stack.SocketNetip(context.Background(), "tcp4", xnet.AF_INET, xnet.SOCK_STREAM, laddr, netip.AddrPort{})
-	if err != nil {
-		return nil, err
-	}
-	listener, ok := sock.(net.Listener)
-	if !ok {
-		return nil, errors.New("stack returned non-listener socket")
-	}
-	return listener, nil
 }

@@ -12,7 +12,7 @@
 // Configure time, so serving requests costs no allocation and memory does not
 // grow with load. Accepting connections is still this program's job.
 //
-// tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=YourSSID -X main.password=YourPassword" -monitor ./examples/http-app
+// tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=YourSSID -X main.password=YourPassword" -monitor ./examples/http-no-allocs
 package main
 
 import (

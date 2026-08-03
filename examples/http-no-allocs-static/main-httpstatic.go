@@ -8,7 +8,7 @@
 // Configure time, so serving requests costs no allocation and memory does not
 // grow with load. Accepting connections is still this program's job.
 //
-// tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=YourSSID -X main.password=YourPassword" -monitor ./examples/http-static
+// tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=YourSSID -X main.password=YourPassword" -monitor ./examples/http-no-allocs-static
 package main
 
 import (
@@ -192,7 +192,7 @@ var pollBackoff = lneto.BackoffStrategy(func(_ uint) time.Duration {
 
 // Server holds the state the handlers share. Handlers run on the router's
 // goroutines, up to maxConns of them at a time, so state they touch is guarded.
-// Both responses here are static, so unlike the http-app example this server
+// Both responses here are static, so unlike the http-no-allocs example this server
 // needs no scratch buffer pool: nothing is rendered per request.
 type Server struct {
 	mu       sync.Mutex

@@ -116,12 +116,12 @@ alive
 ...
 ```
 
-### http-app
+### http-no-allocs
 
-Connects to a WiFi access point, calls NTP to obtain the current date/time, then serves a tiny web application with `httphi` on the low-level lneto interface.
+Connects to a WiFi access point, calls NTP to obtain the current date/time, then serves a tiny web application with `httphi` on the low-level lneto interface. Allocates nothing per request.
 
 ```
-$ tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=yourssid -X main.password=YourPasswordHere" -monitor ./examples/http-app/
+$ tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=yourssid -X main.password=YourPasswordHere" -monitor ./examples/http-no-allocs/
 ...
 got IP: 192.168.1.46
 resolving ntp host: pool.ntp.org
@@ -130,12 +130,12 @@ listening on http://192.168.1.46:80
 ...
 ```
 
-### http-static
+### http-no-allocs-static
 
-Minimal HTTP server using `httphi` that serves a static embedded webpage on the low-level lneto interface.
+Minimal HTTP server using `httphi` that serves a static embedded webpage on the low-level lneto interface. Allocates nothing per request.
 
 ```
-$ tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=yourssid -X main.password=YourPasswordHere" -monitor ./examples/http-static/
+$ tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=yourssid -X main.password=YourPasswordHere" -monitor ./examples/http-no-allocs-static/
 ...
 listening on http://192.168.1.46:80
 incoming connection: 192.168.1.223 from port 53636

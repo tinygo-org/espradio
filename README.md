@@ -19,12 +19,12 @@ Bluetooth is in progress, along with more processors.
 - ESP-NOW peer-to-peer messaging, no access point or TCP/IP needed
 - Go stdlib `net` support using the TinyGo `netdev`/`netlink` interface
 - Pure-Go TCP/IP stack with DHCP, DNS, and NTP (uses [`lneto`](https://github.com/soypat/lneto))
-- Heapless HTTP/1.1 server that allocates nothing per request (uses [`httphi`](https://github.com/soypat/lneto/tree/main/http/httphi)). See examples []
 - TCP and UDP Berkeley sockets API
 - Raw Ethernet frame send/receive
 - MQTT client support (uses [`natiu-mqtt`](https://github.com/soypat/natiu-mqtt))
 - QEMU simulation target for ESP32-C3
-- net/http availability for HTTP/2 support. Not recommended for long running programs. See [examples README](./examples/README.md#http-stdlib).
+- Heapless HTTP/1.1 server that allocates nothing per request (uses [`httphi`](https://github.com/soypat/lneto/tree/main/http/httphi)). See the [http-no-allocs](./examples/README.md#http-no-allocs) and [http-no-allocs-static](./examples/README.md#http-no-allocs-static) examples.
+- `net/http` availability for HTTP/2 support and compatibility with other projects. Note: We strongly recommend using `httphi` instead of `net/http` for long running programs. See [examples README](./examples/README.md#http-stdlib).
 
 ## Getting started with HTTP `hello` example
 We can start a basic HTTP webserver on the [Seeed Studio XIAO-ESP32C3](https://www.seeedstudio.com/Seeed-XIAO-ESP32C3-p-5431.html) using espradio along with the lightweight [`httphi`](https://github.com/soypat/lneto/tree/main/http/httphi) library using the code below. See [the example for all the code](./examples/http-hello/main.go):
@@ -47,23 +47,11 @@ func main() {
 		exch.RespondString(200, "application/json", `{"message":"hello"}`)
 	})
 	var router httphi.Router
-	cfg := httphi.DefaultRouterConfig(maxConns, httpMemoryPerConn, http.MaxPathValues())
+	cfg := httphi.DefaultRouterConfig(4, 2048, http.MaxPathValues())
 	failIfErr("configuring Router", router.Configure(&http, cfg))
 	defer router.Shutdown() // Despawns goroutines.
-	listener, err := Listen(link, port)
-	failIfErr("listening to port", err)
-	defer listener.Close()
-	host, _ := link.Addr()
-	println("HTTP server listening on http://" + host.String() + port)
-	for {
-		conn, err := listener.Accept()
-		failIfErr("accepting conn", err)
-		err = router.Handle(conn)
-		if err != nil {
-			conn.Close()
-			println("failed to handle connection: ", err.Error())
-		}
-	}
+	err := link.ListenAndServe(&router, port)
+	failIfErr("Esplink.ListenAndServe", err)
 }
 ```
 
