@@ -69,13 +69,8 @@ func main() {
 	http.Handle("/on", logRequest(LED_ON))
 
 	var router httphi.Router
-	err = router.Configure(httphi.RouterConfig{
-		FixedNumGoroutines:          4,
-		RequestHeaderBufferSize:     1024, // Google chrome requests are around 700 bytes in header size.
-		ResponseHeaderMinBufferSize: 128,  // We won't be writing too much to headers. Unused request memory is reused on top of this.
-		RequestNumHeaderKVCap:       16,   // Max number of headers we can expect.
-		Mux:                         &http,
-	})
+	cfg := httphi.DefaultRouterConfig(4, 2048, http.MaxPathValues())
+	err = router.Configure(&http, cfg)
 	if err != nil {
 		failure("configure Router: " + err.Error())
 	}
