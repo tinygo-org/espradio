@@ -71,8 +71,10 @@ func main() {
 	cfg := httphi.DefaultRouterConfig(maxConns, httpMemoryPerConn, http.MaxPathValues())
 	failIfErr("configuring Router", router.Configure(&http, cfg))
 	defer router.Shutdown() // Despawns goroutines.
-
-	err := lnk.ListenAndServe(&router, port) // Blocks as long as Router can serve connections.
+	addr, err := lnk.Addr()
+	failIfErr("Esplink.Addr()", err)
+	print("Hosting webserver on http://", addr.String(), ":", port, "\n")
+	err = lnk.ListenAndServe(&router, port) // Blocks as long as Router can serve connections.
 	failIfErr("Esplink.ListenAndServe", err)
 }
 

@@ -35,7 +35,10 @@ func main() {
 	cfg := httphi.DefaultRouterConfig(4, 2048, http.MaxPathValues())
 	failIfErr("configuring Router", router.Configure(&http, cfg))
 	defer router.Shutdown() // Despawns goroutines.
-	err := link.ListenAndServe(&router, port)
+	addr, err := link.Addr()
+	failIfErr("Esplink.Addr()", err)
+	print("Hosting webserver on http://", addr.String(), ":", port, "\n")
+	err = link.ListenAndServe(&router, port) // Blocks as long as Router can serve connections.
 	failIfErr("Esplink.ListenAndServe", err)
 }
 

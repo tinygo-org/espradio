@@ -50,9 +50,7 @@ func main() {
 		Ssid:       ssid,
 		Passphrase: password,
 	})
-	if err != nil {
-		failure("could not connect to WiFi: " + err.Error())
-	}
+	failIfErr("Connecting to WiFi", err)
 	scratchPool.New = func() interface{} { return make([]byte, scratchSize) }
 	var http httphi.MuxSlice
 	http.Handle("/", logRequest(root))
@@ -65,15 +63,14 @@ func main() {
 	var router httphi.Router
 	cfg := httphi.DefaultRouterConfig(4, 2048, http.MaxPathValues())
 	err = router.Configure(&http, cfg)
-	if err != nil {
-		failure("configure Router: " + err.Error())
-	}
+	failIfErr("Configuring httphi.Router", err)
 	defer router.Shutdown() // Despawns goroutines.
-
+	addr, err := link.Addr()
+	failIfErr("Esplink.Addr()", err)
+	print("Hosting webserver on http://", addr.String(), ":", port, "\n")
 	err = link.ListenAndServe(&router, port)
-	if err != nil {
-		failure("Esplink.ListenAndServe: " + err.Error())
-	}
+	failIfErr("Esplink.ListenAndServe", err)
+	panic("unreachable")
 }
 
 func logRequest(h httphi.HandlerFunc) httphi.HandlerFunc {
@@ -133,9 +130,9 @@ func cnt(exch *httphi.Exchange) {
 	exch.Respond(200, "application/json", json)
 }
 
-func failure(msg string) {
-	for {
-		println("failure:", msg)
+func failIfErr(action string, err error) {
+	for err != nil {
+		println("fail " + action + ": " + err.Error())
 		time.Sleep(1 * time.Second)
 	}
 }
