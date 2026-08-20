@@ -1,6 +1,7 @@
-//go:build !esp32c3
+//go:build !esp32c3 && !esp32s3
 
-/* BLE is currently implemented for the ESP32-C3 only (bt_ble.c).
+/* BLE is available on the ESP32-C3 and the ESP32-S3 only.
+ * This file supplies the stubs for the other targets.
  *
  * schedOnce() in radio.go is shared by every supported target and calls
  * espradio_bt_sched_tick() unconditionally, so the other targets still need a

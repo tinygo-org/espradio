@@ -26,8 +26,10 @@ const (
 	halBtMacRstBit     = 1 << 4  // Bluetooth MAC (deprecated, but pulsed by ESP-IDF)
 	halRwBtMacRstBit   = 1 << 9  // RW Bluetooth MAC
 	halRwBtMacRegRst   = 1 << 11 // RW Bluetooth MAC registers
+	halBtBbRegRstBit   = 1 << 13 // Bluetooth baseband registers
 	halWiFiResetMask   = halWiFiBbRstBit | halWiFiFeRstBit | halWiFiMacRstBit |
-		halBtBbRstBit | halBtMacRstBit | halRwBtMacRstBit | halRwBtMacRegRst
+		halBtBbRstBit | halBtMacRstBit | halRwBtMacRstBit | halRwBtMacRegRst |
+		halBtBbRegRstBit
 )
 
 var halWiFiClockRefcnt atomic.Uint32

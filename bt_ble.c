@@ -1,8 +1,12 @@
-//go:build esp32c3
+//go:build esp32c3 || esp32s3
+
+/* Shared BLE controller driver for the ESP32-C3 and the ESP32-S3.
+ * The chip parts are in bt_ble_esp32c3.c and bt_ble_esp32s3.c. */
 
 #include "espradio.h"
 #include "esp_coexist_internal.h"
-#include "esp32c3/esp_bt.h"
+#include "esp_bt.h"
+#include "bt_ble.h"
 #include "btbb.h"
 #include <stdint.h>
 #include <string.h>
@@ -18,9 +22,7 @@
 #define BLE_DBG(...) ((void)0)
 #endif
 
-/* ═══════════════════════════════════════════════════════════════════════════
- * BT Interrupt Handling
- * ═══════════════════════════════════════════════════════════════════════════ */
+/* BT Interrupt Handling */
 
 /* The blob calls interrupt_handler_set with interrupt_no=5 (RWBT+BT_BB) and
  * interrupt_no=8 (RWBLE). We store the handler pointers and dispatch from Go
@@ -28,23 +30,10 @@
 
 typedef void (*bt_isr_fn_t)(void *arg);
 
-/* Critical-section state for bt_interrupt_disable/restore (defined further down;
- * declared here so the diagnostics can report on it). */
-static uint32_t s_bt_int_nesting;
-static uint32_t s_bt_int_saved_mie;
-
-/* Latches for the BLE core event-reporting watch in espradio_bt_sched_tick. */
-static volatile uint32_t s_fifo_seen_count;
-static volatile uint32_t s_stat_seen_count;
-static volatile uint32_t s_stat_seen_bits;
-
 static bt_isr_fn_t s_bt_isr_fn_5;
 static void       *s_bt_isr_arg_5;
 static bt_isr_fn_t s_bt_isr_fn_8;
 static void       *s_bt_isr_arg_8;
-
-#define BT_CPU_INT_PRI_REG_5 (*(volatile uint32_t *)(0x600C2000u + 0x114u + 28u * 4u))
-#define BT_CPU_INT_PRI_REG_8 (*(volatile uint32_t *)(0x600C2000u + 0x114u + 30u * 4u))
 
 /* Wake the BT controller task.
  *
@@ -110,348 +99,26 @@ static void bt_wake_task_throttled(void) {
  * and was false during every actual BT interrupt. */
 static volatile int s_bt_in_isr;
 
-/* Called from Go ISR handler for CPU interrupt assigned to RWBT+BT_BB */
-void espradio_bt_isr_dispatch_5(void) {
-    s_bt_in_isr++;
-    if (s_bt_isr_fn_5) {
-        s_bt_isr_fn_5(s_bt_isr_arg_5);
+/* Run one registered blob ISR and then wake the controller task.
+ * which is 5 for RWBT and BT_BB, 8 for RWBLE. Returns 0 when none is set. */
+int espradio_bt_run_isr(int which) {
+    bt_isr_fn_t fn = (which == 5) ? s_bt_isr_fn_5 : s_bt_isr_fn_8;
+    void       *arg = (which == 5) ? s_bt_isr_arg_5 : s_bt_isr_arg_8;
+    if (fn == NULL) {
+        return 0;
     }
+    s_bt_in_isr++;
+    fn(arg);
     s_bt_in_isr--;
     bt_isr_wake_task();
-    /* Re-raise priority — TinyGo's trap handler restores to defaultThreshold (5)
-     * which equals CPU_INT_THRESH, preventing future interrupts. */
-    BT_CPU_INT_PRI_REG_5 = 7u;
+    return 1;
 }
 
-static volatile uint32_t s_bt_isr8_count;
+/* Diagnostic counts for the chip layer. */
+uint32_t espradio_bt_wake_gives(void) { return s_task_wake_count; }
+uint32_t espradio_bt_wake_nosem(void) { return s_task_wake_nosem; }
 
-/* ISR trace ring — printf from interrupt context would perturb the very timing
- * we're measuring, so record and let the diagnostic goroutine drain it. */
-#define BT_ISR_TRACE_N 16
-static volatile uint32_t s_isr_trace_stat[BT_ISR_TRACE_N];
-static volatile uint32_t s_isr_trace_clk[BT_ISR_TRACE_N];
-static volatile uint32_t s_isr_trace_head;
-
-/* Called from Go ISR handler for CPU interrupt assigned to RWBLE */
-void espradio_bt_isr_dispatch_8(void) {
-    s_bt_in_isr++;
-    uint32_t n = s_bt_isr8_count++;
-    if (n < BT_ISR_TRACE_N) {
-        /* Raw BLE core interrupt status, sampled before the blob ISR acks it. */
-        s_isr_trace_stat[n] = *(volatile uint32_t *)0x60031010u;
-        s_isr_trace_clk[n]  = *(volatile uint32_t *)0x60031060u;
-        s_isr_trace_head = n + 1;
-    }
-    if (s_bt_isr_fn_8) {
-        s_bt_isr_fn_8(s_bt_isr_arg_8);
-    }
-    s_bt_in_isr--;
-    bt_isr_wake_task();
-    /* Re-raise priority — same reason as above */
-    BT_CPU_INT_PRI_REG_8 = 7u;
-}
-
-void espradio_bt_dump_probe_hits(void);
-
-/* Drain the ISR trace into the log. Called from the Go diagnostic goroutine. */
-void espradio_bt_dump_isr_trace(void) {
-    static uint32_t printed;
-    while (printed < s_isr_trace_head) {
-        BLE_DBG("  isr8[%lu] stat=0x%08lx dat60=0x%08lx\n", (unsigned long)printed,
-                (unsigned long)s_isr_trace_stat[printed],
-                (unsigned long)s_isr_trace_clk[printed]);
-        printed++;
-    }
-    espradio_bt_dump_probe_hits();
-}
-
-/* Called from schedOnce() to poll BLE ISR (like WiFi's espradio_call_wifi_isr).
- * Drives the BLE scheduler forward when hardware interrupts don't fire. */
-void espradio_call_bt_isr(void) {
-    if (s_bt_isr_fn_8) {
-        s_bt_isr_fn_8(s_bt_isr_arg_8);
-    }
-    if (s_bt_isr_fn_5) {
-        s_bt_isr_fn_5(s_bt_isr_arg_5);
-    }
-}
-
-uint32_t espradio_bt_isr8_count(void) { return s_bt_isr8_count; }
-
-/* INTC diagnostic — check if BLE CPU interrupts are enabled and pending */
-uint32_t espradio_bt_intc_enable(void) {
-    return *(volatile uint32_t *)(0x600C2000u + 0x104u); /* CPU_INT_ENABLE */
-}
-/* ─── sch_arb_insert probe ───
- * ip_funcs[0x6b0] is the scheduler-arbiter insert that r_lld_scan_start calls to
- * schedule the scan activity.  It can return 0 (success) on paths that don't
- * actually link the element, so wrap the table entry to capture the real return
- * value and the timing inputs.  Same mechanism the blob's own *_funcs_reset()
- * uses, so it is safe to install after controller_enable. */
-#define BLE_REG(off) (*(volatile uint32_t *)(0x60031000u + (off)))
-
-typedef char (*sch_arb_insert_fn)(void *elt);
-static sch_arb_insert_fn s_orig_sch_arb_insert;
-static volatile uint32_t s_arb_insert_calls;
-static volatile int32_t  s_arb_insert_last_ret = -1;
-
-extern uint32_t r_lld_read_clock(void);
-
-static char bt_sch_arb_insert_probe(void *elt) {
-    uint32_t *e = (uint32_t *)elt;
-    uint32_t clk_before = r_lld_read_clock();
-    uint32_t ts = e ? e[1] : 0;
-    uint32_t off = e ? e[2] : 0;
-    uint32_t dur = e ? e[4] : 0;
-
-    char ret = s_orig_sch_arb_insert ? s_orig_sch_arb_insert(elt) : (char)0xFF;
-
-    s_arb_insert_calls++;
-    s_arb_insert_last_ret = (int32_t)(unsigned char)ret;
-    BLE_DBG("ARB_INS #%lu elt=%p ts=%lu off=%lu dur=%lu clk=%lu ret=%d head=%p tgt=%lu cntl=0x%08lx\n",
-            (unsigned long)s_arb_insert_calls, elt, (unsigned long)ts, (unsigned long)off,
-            (unsigned long)dur, (unsigned long)clk_before, (int)ret,
-            (void *)*(volatile uint32_t *)0x3fcdfbacu,
-            (unsigned long)BLE_REG(0xec), (unsigned long)BLE_REG(0x0c));
-    return ret;
-}
-
-/* ─── Counter probes on the event-start / radio-programming path ───
- * These run in ISR context, so they only bump a counter — printf here would
- * change the timing being measured.  Drained by espradio_bt_dump_isr_trace().
- * Generic 4-arg trampoline: on RISC-V forwarding a0..a3 is safe even for
- * callees that take fewer arguments, since they simply ignore the extra regs. */
-typedef uint32_t (*bt_probe_fn)(uint32_t, uint32_t, uint32_t, uint32_t);
-
-enum {
-    PROBE_SCAN_EVT_START = 0, /* ip[0x3ec] r_lld_scan_evt_start_cbk_eco */
-    PROBE_PROG_BLE_PUSH,      /* ip[0x7a8] r_sch_prog_ble_push_hack    */
-    PROBE_PROG_END_ISR,       /* ip[0x6c0] r_sch_prog_end_isr_hack     */
-    PROBE_SCAN_FRM_EOF,       /* ip[0x3f4] r_lld_scan_frm_eof_isr_eco  */
-    PROBE_SCAN_FRM_RX,        /* ip[0x408] r_lld_scan_process_pkt_rx_hack */
-    PROBE_ADV_REP,            /* ip[0x424] r_lld_scan_process_pkt_rx_adv_rep_hack */
-    PROBE_COUNT
-};
-
-static const uint16_t s_probe_off[PROBE_COUNT] = {
-    0x3ec, 0x7a8, 0x6c0, 0x3f4, 0x408, 0x424,
-};
-static const char *const s_probe_name[PROBE_COUNT] = {
-    "scan_evt_start", "prog_ble_push", "prog_end_isr",
-    "scan_frm_eof", "scan_pkt_rx", "adv_rep",
-};
-
-static bt_probe_fn s_probe_orig[PROBE_COUNT];
-static volatile uint32_t s_probe_hits[PROBE_COUNT];
-
-#define BT_DEFINE_PROBE(idx)                                                   \
-    static uint32_t bt_probe_##idx(uint32_t a, uint32_t b, uint32_t c,         \
-                                   uint32_t d) {                               \
-        s_probe_hits[idx]++;                                                   \
-        if (s_probe_orig[idx] == NULL) return 0;                               \
-        return s_probe_orig[idx](a, b, c, d);                                  \
-    }
-
-BT_DEFINE_PROBE(0)
-BT_DEFINE_PROBE(1)
-BT_DEFINE_PROBE(2)
-BT_DEFINE_PROBE(3)
-BT_DEFINE_PROBE(4)
-BT_DEFINE_PROBE(5)
-
-static bt_probe_fn const s_probe_tramp[PROBE_COUNT] = {
-    bt_probe_0, bt_probe_1, bt_probe_2, bt_probe_3, bt_probe_4, bt_probe_5,
-};
-
-/* Called from Go after espradio_ble_init() completes. */
-void espradio_bt_install_probes(void) {
-    uint32_t ip = *(volatile uint32_t *)0x3fcdff8cu; /* r_ip_funcs_p */
-    if (ip == 0) {
-        BLE_DBG("probes: r_ip_funcs_p is NULL\n");
-        return;
-    }
-    volatile uint32_t *slot = (volatile uint32_t *)(ip + 0x6b0);
-    if (s_orig_sch_arb_insert == NULL) {
-        s_orig_sch_arb_insert = (sch_arb_insert_fn)(uintptr_t)*slot;
-        *slot = (uint32_t)(uintptr_t)&bt_sch_arb_insert_probe;
-        BLE_DBG("probes: sch_arb_insert %p -> %p\n",
-                (void *)s_orig_sch_arb_insert, (void *)&bt_sch_arb_insert_probe);
-    }
-    for (int i = 0; i < PROBE_COUNT; i++) {
-        if (s_probe_orig[i] != NULL) continue;
-        volatile uint32_t *p = (volatile uint32_t *)(ip + s_probe_off[i]);
-        s_probe_orig[i] = (bt_probe_fn)(uintptr_t)*p;
-        *p = (uint32_t)(uintptr_t)s_probe_tramp[i];
-        BLE_DBG("probes: ip[0x%03x] %-15s %p\n", s_probe_off[i], s_probe_name[i],
-                (void *)s_probe_orig[i]);
-    }
-}
-
-/* Re-run the BT RF phase-match calibration after the controller is fully up.
- *
- * r_cali_phase_match_p sweeps hi/lo (0..3, 0..3) in BLE +0xf8 bits 9:8 / 5:4,
- * asserting bit 0 to start each attempt, and waits for bit 12 to signal lock.
- * During btdm_controller_enable it exhausts all 16 and prints "phase match cali
- * failed!".  If it locks when re-run here, the calibration itself is fine and the
- * power-up sequence simply runs it too early; if it still fails, the RF/PLL it
- * calibrates against is not coming up at all. */
-extern void r_cali_phase_match_p(void);
-
-void espradio_bt_recali_phase_match(void) {
-    /* The cali loop polls bit 12 with only ets_delay_us(1) of settling between
-     * attempts. ROM ets_delay_us busy-waits on the cycle counter scaled by the
-     * ROM's cached ticks-per-us; if TinyGo changed the CPU clock without calling
-     * ets_update_cpu_frequency, that delay is wrong and the comparator is sampled
-     * before it settles -- which would exhaust all 16 combos and report failure
-     * on hardware that is actually fine. Measure it against a known time source. */
-    extern void ets_delay_us(uint32_t us);
-    /* Cross-check three independent clocks so we know which one is lying:
-     *   espradio_time_us_now() - the OSI time source
-     *   mcycle                 - RISC-V cycle counter (160 MHz => 160 ticks/us)
-     *   r_lld_read_clock()     - BLE native clock, 312.5us per tick
-     * A real 1000us delay is 160000 cycles and ~3.2 BLE ticks. */
-    uint64_t t0 = espradio_time_us_now();
-    uint32_t b0 = r_lld_read_clock();
-    ets_delay_us(100000); /* 100ms == 320 BLE ticks, big enough to be unambiguous */
-    uint32_t b1 = r_lld_read_clock();
-    uint64_t t1 = espradio_time_us_now();
-    BLE_DBG("  ets_delay_us(100000): time_us=%lu bleclk=%lu (expect ~100000 / ~320)\n",
-            (unsigned long)(uint32_t)(t1 - t0), (unsigned long)(b1 - b0));
-
-    uint32_t before = BLE_REG(0xf8);
-    r_cali_phase_match_p();
-    uint32_t after = BLE_REG(0xf8);
-    BLE_DBG("  recali: 0xf8 %08lx -> %08lx  locked=%d (hi=%lu lo=%lu)\n",
-            (unsigned long)before, (unsigned long)after,
-            (after & 0x1000u) ? 1 : 0,
-            (unsigned long)((after >> 8) & 0x3u),
-            (unsigned long)((after >> 4) & 0x3u));
-}
-
-void espradio_bt_dump_probe_hits(void) {
-    /* Compare the OSI time source against the BLE native clock across the
-     * caller's 2s interval. bleclk ticks are 312.5us, so a healthy pair is
-     * ~2000000us against ~6400 ticks. This runs in normal goroutine context,
-     * unlike the ets_delay_us probe which measures inside a ROM busy-wait. */
-    {
-        static uint64_t p_us;
-        static uint32_t p_blk;
-        uint64_t us = espradio_time_us_now();
-        uint32_t blk = r_lld_read_clock();
-        if (p_us) {
-            uint32_t d_us = (uint32_t)(us - p_us);
-            uint32_t d_blk = blk - p_blk;
-            BLE_DBG("  clocks: d_time_us=%lu d_bleclk=%lu (ble implies %luus)\n",
-                    (unsigned long)d_us, (unsigned long)d_blk,
-                    (unsigned long)(d_blk * 3125u / 10u));
-        }
-        p_us = us;
-        p_blk = blk;
-    }
-
-    BLE_DBG("  wake: sem_gives=%lu nosem=%lu\n",
-            (unsigned long)s_task_wake_count, (unsigned long)s_task_wake_nosem);
-    BLE_DBG("  probes:");
-    for (int i = 0; i < PROBE_COUNT; i++) {
-        BLE_DBG(" %s=%lu", s_probe_name[i], (unsigned long)s_probe_hits[i]);
-    }
-    BLE_DBG("\n");
-
-    /* If a blob critical section leaked (yield between interrupt_disable and
-     * interrupt_restore), mstatus.MIE stays 0 for every goroutine and no
-     * interrupt can ever be delivered again.  nest!=0 or mie==0 here is the
-     * smoking gun for that. */
-    uint32_t mstatus;
-    __asm__ volatile ("csrr %0, mstatus" : "=r"(mstatus));
-    /* ESP32-C3 interrupt matrix: an interrupt is delivered only when its
-     * priority is STRICTLY GREATER than CPU_INT_THRESH.  If TinyGo's trap
-     * handler leaves the threshold raised to the priority of the interrupt it
-     * just serviced (7 for BT), then BT can never fire a second time. */
-#define INTC_REG(off) (*(volatile uint32_t *)(0x600C2000u + (off)))
-    /* Ask the controller itself whether it considers the radio active, rather
-     * than inferring it from the raw btdm_pwr_state word. */
-    extern bool btdm_power_state_active(void);
-    extern int  btdm_get_power_state(void);
-    BLE_DBG("  pwr: active=%d state=%d rf0xf8=0x%08lx bb0x1050=0x%08lx bb0x1868=0x%08lx\n",
-            (int)btdm_power_state_active(), (int)btdm_get_power_state(),
-            (unsigned long)BLE_REG(0xf8),
-            (unsigned long)*(volatile uint32_t *)0x60011050u,
-            (unsigned long)*(volatile uint32_t *)0x60011868u);
-
-    BLE_DBG("  cs: mie=%lu nest=%lu saved=%lu | rwblecntl=0x%08lx dat2d8=0x%08lx dat100=0x%08lx\n"
-            "  intc: thresh=%lu pri28=%lu pri30=%lu eip=0x%08lx en=0x%08lx type=0x%08lx\n",
-            (unsigned long)((mstatus >> 3) & 1u),
-            (unsigned long)s_bt_int_nesting, (unsigned long)s_bt_int_saved_mie,
-            (unsigned long)BLE_REG(0x00), (unsigned long)BLE_REG(0x2d8),
-            (unsigned long)BLE_REG(0x100),
-            (unsigned long)INTC_REG(0x194),
-            (unsigned long)INTC_REG(0x114 + 28 * 4),
-            (unsigned long)INTC_REG(0x114 + 30 * 4),
-            (unsigned long)INTC_REG(0x110),
-            (unsigned long)INTC_REG(0x104),
-            (unsigned long)INTC_REG(0x108));
-}
-
-uint32_t espradio_bt_intc_pending(void) {
-    uint32_t rwble_map = *(volatile uint32_t *)(0x600C2000u + 8u * 4u);
-    uint32_t scan_env = *(volatile uint32_t *)0x3fcdffacu; /* lld_scan_env pointer */
-    uint32_t pwr_state = *(volatile uint32_t *)0x3fcdff18u; /* btdm_pwr_state */
-
-    /* lld_scan_env is a 0x20-byte struct whose first two words are the two
-     * scheduler-activity structs (1M PHY, coded PHY).  r_lld_scan_start only
-     * allocates one when the corresponding PHY bit is set in the scan params,
-     * and only then does it call sch_arb_insert — so a non-zero evt[0] is the
-     * decisive proof that the scan activity actually got scheduled. */
-    uint32_t evt0 = 0, evt1 = 0;
-    if (scan_env) {
-        evt0 = *(volatile uint32_t *)(scan_env + 0);
-        evt1 = *(volatile uint32_t *)(scan_env + 4);
-    }
-
-    /* PHY mask lives at byte 2 of the activity slot's param block:
-     * p_llm_env[8] = activity table, slot = 0x44 bytes, slot[0] = param ptr,
-     * slot[0x40] = state (6 == scan reserved). */
-    uint32_t phy_mask = 0xFF, act_state = 0xFF;
-    uint32_t llm_env = *(volatile uint32_t *)0x3fcdff98u;
-    if (llm_env) {
-        uint32_t act_table = *(volatile uint32_t *)(llm_env + 8);
-        if (act_table) {
-            for (int i = 0; i < 6; i++) {
-                uint32_t slot = act_table + (uint32_t)i * 0x44u;
-                uint8_t st = *(volatile uint8_t *)(slot + 0x40);
-                if (st == 6) {
-                    uint32_t param = *(volatile uint32_t *)slot;
-                    act_state = st;
-                    phy_mask = param ? *(volatile uint8_t *)(param + 2) : 0xFEu;
-                    break;
-                }
-            }
-        }
-    }
-
-    /* BLE core registers (see r_rwip_timer_hus_set / r_rwble_isr_hack):
-     *   +0x0c = interrupt enable/control, bit 11 (0x800) = hus timer target
-     *   +0x10 = raw interrupt status
-     *   +0xec = CLKN timer target ("COMPVAL")
-     *   +0xf0 = fine (half-us) target within the slot */
-    BLE_DBG("  diag: rwble->cpu%lu scan_env=%p evt=[%p,%p] phy=0x%02lx st=%lu pwr=%lu\n"
-            "        cntl=0x%08lx stat=0x%08lx tgt=%lu fine=%lu clk=%lu arb_ins=%lu/ret=%ld\n"
-            "        seen: fifo=%lu statN=%lu statBits=0x%08lx\n",
-            (unsigned long)rwble_map, (void *)scan_env, (void *)evt0, (void *)evt1,
-            (unsigned long)phy_mask, (unsigned long)act_state, (unsigned long)pwr_state,
-            (unsigned long)BLE_REG(0x0c), (unsigned long)BLE_REG(0x10),
-            (unsigned long)BLE_REG(0xec), (unsigned long)BLE_REG(0xf0),
-            (unsigned long)r_lld_read_clock(),
-            (unsigned long)s_arb_insert_calls, (long)s_arb_insert_last_ret,
-            (unsigned long)s_fifo_seen_count, (unsigned long)s_stat_seen_count,
-            (unsigned long)s_stat_seen_bits);
-    return (rwble_map << 24) | (evt0 != 0 ? 0x200 : 0) | (scan_env != 0 ? 0x100 : 0) |
-           (pwr_state & 0xFF);
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
- * VHCI Ring Buffer (controller → host)
- * ═══════════════════════════════════════════════════════════════════════════ */
+/* VHCI Ring Buffer (controller → host) */
 
 /* The ring itself is implemented in Go (vhci_ring.go), which is what lets the
  * unit-test target reach it without the BTDM blob. */
@@ -546,9 +213,7 @@ int espradio_vhci_write(const uint8_t *data, int len) {
     return len;
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════
- * BT OSI Function Table
- * ═══════════════════════════════════════════════════════════════════════════ */
+/* BT OSI Function Table */
 
 /* Forward declarations for existing WiFi OSI primitives (from osi.c / radio.go) */
 extern void *espradio_semphr_create(uint32_t max, uint32_t init);
@@ -588,29 +253,9 @@ static int bt_is_in_isr(void) {
  * onto the same ke queues via ke_msg_send_from_isr.  With no-ops here the ke
  * message list gets corrupted and event delivery silently stops.
  *
- * Implemented as a counted save/restore of mstatus.MIE rather than by touching
- * CPU_INT_THRESH.  Nesting is tracked so the inner-most restore doesn't
- * re-enable early.  The blob never yields inside these regions (in ESP-IDF they
- * map to portENTER_CRITICAL), so the cooperative scheduler can't leak a
- * disabled state across goroutines. */
-static void bt_interrupt_disable(void) {
-    uint32_t mstatus;
-    /* Atomically clear mstatus.MIE (bit 3) and return the previous value. */
-    __asm__ volatile ("csrrci %0, mstatus, 8" : "=r"(mstatus) :: "memory");
-    if (s_bt_int_nesting == 0) {
-        s_bt_int_saved_mie = mstatus & 0x8u;
-    }
-    s_bt_int_nesting++;
-}
-
-static void bt_interrupt_restore(void) {
-    if (s_bt_int_nesting == 0) {
-        return; /* unbalanced restore — ignore rather than enabling early */
-    }
-    if (--s_bt_int_nesting == 0 && s_bt_int_saved_mie) {
-        __asm__ volatile ("csrsi mstatus, 8" ::: "memory");
-    }
-}
+ * The chip layer owns the mechanism, because it is different on each chip. */
+static void bt_interrupt_disable(void) { espradio_bt_cs_enter(); }
+static void bt_interrupt_restore(void) { espradio_bt_cs_exit(); }
 
 /* ─── Interrupt alloc/handler_set ─── */
 /* Called from Go (espradio_bt_enable_interrupts) after init to enable hw ints */
@@ -724,7 +369,7 @@ static int bt_read_efuse_mac(void *mac) {
 /* ─── Random ─── */
 static void bt_srand(uint32_t seed) { (void)seed; }
 static int  bt_rand(void) {
-    return (int)(*(volatile uint32_t *)0x600260B0u); /* RNG_DATA_REG */
+    return (int)espradio_bt_hw_rand();
 }
 
 /* ─── Time/Clock stubs ─── */
@@ -780,7 +425,7 @@ static void bt_coex_bt_wakeup_request(void) {
     s_wakeup_request_count++;
     BLE_DBG("coex_bt_wakeup_request (#%lu pwr=%lu)\n",
             (unsigned long)s_wakeup_request_count,
-            (unsigned long)*(volatile uint32_t *)0x3fcdff18u);
+            (unsigned long)btdm_pwr_state);
     btdm_wakeup_request();
 }
 
@@ -844,21 +489,8 @@ static void bt_pump_hci(void) {
 void espradio_bt_sched_tick(void) {
     if (!s_bt_isr_fn_8) return; /* BLE not initialized */
 
-    /* Watch for any sign of life from the BLE core's event-reporting paths.
-     * r_lld_core_init puts the core in IRQ-FIFO mode (INTCNTL = 0x640000|0x166,
-     * 0x600312d8 |= 0x8000001e), so r_rwble_isr_hack takes event status from the
-     * FIFO at +0x2d8 rather than the classic status register at +0x10:
-     *   count = (dat2d8 >> 5) & 0x1f,  entry = (dat2d8 << 1) >> 11
-     * Latch whether either ever becomes non-zero.  If the FIFO does fill but no
-     * interrupt arrives, the fault is interrupt delivery/masking; if it stays
-     * empty, the programmed radio event genuinely never completes. */
-    uint32_t fifo = *(volatile uint32_t *)0x600312d8u;
-    uint32_t stat = *(volatile uint32_t *)0x60031010u;
-    if (((fifo >> 5) & 0x1fu) != 0) s_fifo_seen_count++;
-    if (stat != 0) {
-        s_stat_seen_count++;
-        s_stat_seen_bits |= stat;
-    }
+    /* Run the deferred ISRs. The ESP32-C3 does nothing here. */
+    espradio_bt_chip_service_isrs();
 
     /* Heartbeat the controller task.
      *
@@ -893,22 +525,8 @@ void espradio_bt_sched_tick(void) {
     if (s_sched_tick_mask & BT_TICK_RWIP_SCHEDULE) {
         r_rwip_schedule();
     }
-    /* Debug: check function pointer tables + sch_arb */
-    static uint32_t s_tick_count;
-    if (++s_tick_count % 400 == 0) { /* every 2s */
-        uint32_t arb_first = *(volatile uint32_t *)0x3fcdfbacu;
-        uint32_t ke_evt = *(volatile uint32_t *)0x3fcdfd90u;
-        extern uint32_t r_lld_read_clock(void);
-        uint32_t clk = r_lld_read_clock();
-        /* Check critical function pointer table entries */
-        uint32_t plf_p = *(volatile uint32_t *)0x3fcdff80u; /* r_plf_funcs_p */
-        uint32_t ip_p = *(volatile uint32_t *)0x3fcdff8cu;  /* r_ip_funcs_p */
-        uint32_t emi_fn = plf_p ? *(volatile uint32_t *)(plf_p + 0xbc) : 0; /* plf[47] = emi_get_mem */
-        uint32_t arb_ins = ip_p ? *(volatile uint32_t *)(ip_p + 0x6b0) : 0; /* ip[0x1ac] = sch_arb_insert */
-        BLE_DBG("sched: arb=%p clk=%lu emi=%p arb_ins=%p\n",
-                (void *)arb_first, (unsigned long)clk,
-                (void *)emi_fn, (void *)arb_ins);
-    }
+
+    espradio_bt_chip_debug_tick();
 }
 
 /* ─── Power ─── */
@@ -1107,9 +725,7 @@ static const bt_osi_funcs_t s_bt_osi_funcs = {
     .assert                   = bt_assert,
 };
 
-/* ═══════════════════════════════════════════════════════════════════════════
- * BLE Controller Initialization
- * ═══════════════════════════════════════════════════════════════════════════ */
+/* BLE Controller Initialization */
 
 /* ROM functions from libbtdm_app.a */
 extern int  btdm_osi_funcs_register(const void *osi_funcs);
@@ -1191,16 +807,16 @@ int espradio_ble_init(void) {
 
     APB_CTRL_WIFI_CLK_EN_REG =
         (APB_CTRL_WIFI_CLK_EN_REG & ~WIFI_BT_SDIO_CLK) | MODEM_CLK_EN;
-    __asm__ volatile ("fence" ::: "memory");
+    ESPRADIO_MEMORY_BARRIER();
     ets_delay_us(50);
 
     /* Assert then release only the BT bits, so a WiFi session that is already
      * running is left alone. */
     APB_CTRL_WIFI_RST_EN_REG |= BT_RST_BITS;
-    __asm__ volatile ("fence" ::: "memory");
+    ESPRADIO_MEMORY_BARRIER();
     ets_delay_us(10);
     APB_CTRL_WIFI_RST_EN_REG &= ~BT_RST_BITS;
-    __asm__ volatile ("fence" ::: "memory");
+    ESPRADIO_MEMORY_BARRIER();
     ets_delay_us(50);
 
     BLE_DBG("  clk/rst after:  clk=0x%08lx rst=0x%08lx\n",
@@ -1222,8 +838,9 @@ int espradio_ble_init(void) {
      * burns all 16 hi/lo combinations in a few microseconds -- reporting
      * "phase match cali failed!" on hardware that never got a chance to settle. */
     extern void ets_update_cpu_frequency(uint32_t ticks_per_us);
-    ets_update_cpu_frequency(160);
-    BLE_DBG("  ets_update_cpu_frequency(160) done\n");
+    uint32_t ticks_per_us = espradio_bt_cpu_ticks_per_us();
+    ets_update_cpu_frequency(ticks_per_us);
+    BLE_DBG("  ets_update_cpu_frequency(%lu) done\n", (unsigned long)ticks_per_us);
 
     /* Step 1: ROM data init */
     btdm_controller_rom_data_init();
@@ -1256,7 +873,7 @@ int espradio_ble_init(void) {
     cfg.mesh_adv_size = 0;
     cfg.normal_adv_size = 100;
     cfg.coex_phy_coded_tx_rx_time_limit = 0;
-    cfg.hw_target_code = 0x01010000; /* ESP32-C3 specific */
+    cfg.hw_target_code = espradio_bt_hw_target_code();
     cfg.slave_ce_len_min = SLAVE_CE_LEN_MIN_DEFAULT;
     cfg.hw_recorrect_en = 0;
     cfg.cca_thresh = 75;
@@ -1300,7 +917,7 @@ int espradio_ble_init(void) {
     /* Step 4c: Disable sleep at ROM level BEFORE controller_init.
      * The task starts during init and calls rw_schedule → r_rwip_sleep.
      * With rw_sleep_enable=0, the sleep path is skipped. */
-    *(volatile uint32_t *)0x3fcdfc34u = 0; /* rw_sleep_enable = 0 */
+    rw_sleep_enable = 0;
 
     /* Step 5: Enable the PHY *before* btdm_controller_init().
      *
@@ -1380,9 +997,8 @@ int espradio_ble_init(void) {
      * classic per-source enables are not the mechanism. Left documented rather
      * than poked. btdm_pwr_state also never reaches 4 (stays 0) for the same
      * reason — the wakeup tail never runs. */
-    BLE_DBG("  intcntl=0x%08lx pwr_state=%lu\n",
-            (unsigned long)*(volatile uint32_t *)0x6003100Cu,
-            (unsigned long)*(volatile uint32_t *)0x3fcdff18u);
+    BLE_DBG("  pwr_state=%lu\n", (unsigned long)btdm_pwr_state);
+    espradio_bt_chip_debug_after_init();
 
     /* Step 8b: Disable modem sleep and set prevent_sleep flags. */
     extern void btdm_controller_enable_sleep(bool enable);

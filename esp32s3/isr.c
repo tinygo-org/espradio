@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include "espradio.h"
+#include "bt_ble.h"
 #include "soc/interrupts.h"
 
 /* ---- Xtensa interrupt controller (ESP32-S3) ---- */
@@ -133,6 +134,11 @@ void espradio_snapshot_intenable(void) {
  * of every schedOnce() cycle) to ensure that after blob processing, the
  * schedTicker goroutine runs with PS.INTLEVEL=0. */
 void espradio_lower_intlevel(void) {
+    /* Do not open a BT critical section from the outside. The blob reads its
+     * ke_env queues while its own ISR writes to them. */
+    if (espradio_bt_cs_depth() != 0) {
+        return;
+    }
     uint32_t ps;
     __asm__ volatile ("rsr %0, ps" : "=r"(ps));
     ps &= ~0x0Fu;               /* clear INTLEVEL bits [3:0] */
@@ -238,4 +244,39 @@ void espradio_wifi_unmask(void) {
      * leave the schedTicker goroutine permanently at INTLEVEL=3, silencing
      * all level-1 interrupts until explicitly lowered here. */
     espradio_lower_intlevel();
+}
+
+/* BLE interrupt wiring */
+
+/* These must agree with radio_esp32s3.go and bt_ble_esp32s3.c. */
+#define BT_CPU_INT_5  13u  /* RWBT + BT_BB sources */
+#define BT_CPU_INT_8  17u  /* RWBLE source */
+
+#define BT_CPU_INT_MASK ((1u << BT_CPU_INT_5) | (1u << BT_CPU_INT_8))
+
+/* Mask the given CPU interrupts. espradio_ints_off() ignores its mask on this
+ * chip and changes only the WiFi bit. */
+void espradio_bt_ints_off(uint32_t mask) {
+    uint32_t val;
+    __asm__ volatile ("rsr %0, intenable" : "=r"(val));
+    val &= ~mask;
+    __asm__ volatile ("wsr %0, intenable; rsync" :: "r"(val));
+}
+
+/* Enable the two BT lines again after the deferred ISRs run. */
+void espradio_bt_unmask(void) {
+    uint32_t val;
+    __asm__ volatile ("rsr %0, intenable" : "=r"(val));
+    val |= BT_CPU_INT_MASK;
+    __asm__ volatile ("wsr %0, intenable; rsync" :: "r"(val));
+}
+
+/* Route the BT sources to their CPU interrupts. The type and the priority are
+ * fixed for each line. See ESP32-S3 TRM v1.6 section 9.3.2. */
+void espradio_bt_enable_hw_interrupts(void) {
+    intr_matrix_set(0, ETS_BT_BB_INTR_SOURCE, BT_CPU_INT_5);
+    intr_matrix_set(0, ETS_RWBT_INTR_SOURCE,  BT_CPU_INT_5);
+    intr_matrix_set(0, ETS_RWBLE_INTR_SOURCE, BT_CPU_INT_8);
+    espradio_bt_unmask();
+    __asm__ volatile ("memw" ::: "memory");
 }

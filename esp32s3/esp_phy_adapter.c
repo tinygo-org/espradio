@@ -34,8 +34,13 @@ uint32_t phy_enter_critical(void) {
     return old;
 }
 
+/* Restore only the INTLEVEL field. A stale EXCM makes the next retw an
+ * illegal instruction. See Xtensa ISA Reference Manual section 4.7.4. */
 void phy_exit_critical(uint32_t level) {
-    __asm__ __volatile__("wsr.ps %0; rsync" :: "r"(level));
+    uint32_t ps;
+    __asm__ __volatile__("rsr %0, ps" : "=r"(ps));
+    ps = (ps & ~0x0Fu) | (level & 0x0Fu);
+    __asm__ __volatile__("wsr %0, ps; rsync" :: "r"(ps) : "memory");
 }
 
 static uint32_t s_phy_i2c_saved_ps;

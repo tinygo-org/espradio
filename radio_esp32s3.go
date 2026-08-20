@@ -9,9 +9,9 @@ package espradio
 #cgo CFLAGS: -DCONFIG_SOC_WIFI_NAN_SUPPORT=0
 #cgo CFLAGS: -DESPRADIO_PHY_PATCH_ROMFUNCS=0
 #cgo CFLAGS: -fno-short-enums
-#cgo LDFLAGS: -Lblobs/libs/esp32s3 -lcoexist -lcore -lmesh -lnet80211 -lespnow -lregulatory -lphy -lpp -lwpa_supplicant
+#cgo LDFLAGS: -Lblobs/libs/esp32s3 -lcoexist -lcore -lmesh -lnet80211 -lespnow -lregulatory -lphy -lpp -lwpa_supplicant -lbtbb -lbtdm_app
 
-#include "include.h"
+#include "espradio.h"
 */
 import "C"
 
@@ -76,5 +76,33 @@ func wifiISRHandler(interrupt.Interrupt) {
 	C.espradio_ints_off(C.uint32_t(1 << wifiCPUInterrupt))
 	// Unthrottled deliberately: a real hardware event, and here it is the only
 	// thing that will run the blob ISR, since this handler does not.
+	kickSched()
+}
+
+// BT interrupt handlers
+
+// Free level 1 lines. These must agree with esp32s3/isr.c and
+// bt_ble_esp32s3.c.
+const (
+	btCPUInt5 = 13 // RWBT + BT_BB → CPU interrupt 13
+	btCPUInt8 = 17 // RWBLE → CPU interrupt 17
+)
+
+func setupBTInterrupts() {
+	intr5 := interrupt.New(btCPUInt5, btISR5Handler)
+	intr5.Enable()
+	intr8 := interrupt.New(btCPUInt8, btISR8Handler)
+	intr8.Enable()
+}
+
+// These handlers must not run the blob ISR, because TinyGo dispatches the
+// interrupt on the stack of the goroutine that was interrupted.
+func btISR5Handler(interrupt.Interrupt) {
+	C.espradio_bt_isr_latch_5()
+	kickSched()
+}
+
+func btISR8Handler(interrupt.Interrupt) {
+	C.espradio_bt_isr_latch_8()
 	kickSched()
 }

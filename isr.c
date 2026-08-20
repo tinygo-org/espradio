@@ -42,12 +42,12 @@ void espradio_user_exception(uint32_t cause, uint32_t epc, uint32_t excvaddr, ui
     printf("  EXCCAUSE = %lu (%s)\n", (unsigned long)cause, exccause_name(cause));
     printf("  EPC1     = 0x%08lx\n", (unsigned long)epc);
     printf("  EXCVADDR = 0x%08lx\n", (unsigned long)excvaddr);
-    /* Dump WindowBase and WindowStart to see register window state */
-    uint32_t wb, ws;
-    __asm__ volatile ("rsr %0, WINDOWBASE" : "=r"(wb));
-    __asm__ volatile ("rsr %0, WINDOWSTART" : "=r"(ws));
-    printf("  WINDOWBASE = %lu  WINDOWSTART = 0x%04lx\n",
-           (unsigned long)wb, (unsigned long)ws);
+    /* The vector captures these at the time of the fault. A read here gives
+     * the values for this function. */
+    if (frame) {
+        printf("  WINDOWBASE = %lu  WINDOWSTART = 0x%04lx  (at fault)\n",
+               (unsigned long)frame[19], (unsigned long)frame[20]);
+    }
     /* Dump saved registers from the exception frame.
      * Layout:  0:a0  4:a1(orig)  8:a2  12:a3  16:a4  20:a5
      *         24:a6  28:a7  32:a8  36:a9  40:a10 44:a11

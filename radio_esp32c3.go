@@ -10,7 +10,7 @@ package espradio
 #cgo CFLAGS: -DESPRADIO_PHY_PATCH_ROMFUNCS=0
 #cgo LDFLAGS: -Lblobs/libs/esp32c3 -lcoexist -lcore -lmesh -lnet80211 -lespnow -lregulatory -lphy -lpp -lwpa_supplicant -lbtbb -lbtdm_app
 
-#include "include.h"
+#include "espradio.h"
 */
 import "C"
 
@@ -87,4 +87,35 @@ func wifiISRHandler(interrupt.Interrupt) {
 	// Unthrottled deliberately: this is a real hardware event and must be
 	// serviced now.  Only the cooperative-yield path is rate-limited.
 	kickSched()
+}
+
+// BT interrupt handlers
+
+// CPU interrupt numbers for BT (must match esp32c3/isr.c)
+const (
+	btCPUInt5 = 28 // RWBT + BT_BB → CPU interrupt 28
+	btCPUInt8 = 30 // RWBLE → CPU interrupt 30
+)
+
+func setupBTInterrupts() {
+	// Enable() sets priority 5 and edge type. espradio_bt_enable_hw_interrupts()
+	// then sets priority 7 and level type.
+	intr5 := interrupt.New(btCPUInt5, btISR5Handler)
+	intr5.Enable()
+	intr8 := interrupt.New(btCPUInt8, btISR8Handler)
+	intr8.Enable()
+}
+
+// These run blob code in the interrupt context. Code that they call must spin
+// and must not yield.
+func btISR5Handler(interrupt.Interrupt) {
+	C.espradio_enter_hw_isr()
+	C.espradio_bt_isr_dispatch_5()
+	C.espradio_exit_hw_isr()
+}
+
+func btISR8Handler(interrupt.Interrupt) {
+	C.espradio_enter_hw_isr()
+	C.espradio_bt_isr_dispatch_8()
+	C.espradio_exit_hw_isr()
 }
