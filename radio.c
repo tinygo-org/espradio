@@ -418,6 +418,16 @@ esp_err_t espradio_sta_set_config(const char *ssid, int ssid_len,
     memcpy(cfg.sta.password, pwd, pwd_len);
     if (pwd_len > 0)
         cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    /* memset above leaves pmf_cfg = {capable: false, required: false}. Many
+     * routers running WPA2/WPA3 "mixed" (transition) mode set PMF/802.11w to
+     * required globally once WPA3 is enabled at all, even for WPA2-PSK
+     * clients — a client that doesn't advertise PMF capability then fails
+     * association, observed on real hardware as WIFI_REASON_AUTH_EXPIRE
+     * ("auth expired") regardless of signal strength or retries. capable=true
+     * lets the AP's own PMF policy drive the negotiation (works against both
+     * PMF-required and PMF-disabled APs) without us forcing required=true,
+     * which would instead refuse to associate with a PMF-disabled AP. */
+    cfg.sta.pmf_cfg.capable = true;
     return esp_wifi_set_config(WIFI_IF_STA, &cfg);
 }
 

@@ -28,8 +28,13 @@ func main() {
 
 	println("Connecting to WiFi...")
 	err := link.NetConnect(&nl.ConnectParams{
-		Ssid:       ssid,
-		Passphrase: password,
+		Ssid:            ssid,
+		Passphrase:      password,
+		ConnectTimeout:  time.Minute,
+		Retries:         5,
+		ConnectMode:     nl.ConnectModeSTA,
+		AuthType:        nl.AuthTypeWPA2Mixed,
+		WatchdogTimeout: time.Minute,
 	})
 	if err != nil {
 		failure("WiFi connect failed: " + err.Error())

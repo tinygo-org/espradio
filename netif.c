@@ -52,7 +52,17 @@ extern void *g_phyFuns;
  * may be in an inconsistent state under cooperative scheduling (the blob
  * expects ppTask to run preemptively and finalise frame descriptors before
  * PM callbacks access them).  With WIFI_PS_NONE the return value is
- * irrelevant — wrap it to always return 0 ("idle") and avoid the crash. */
+ * irrelevant — wrap it to always return 0 ("idle") and avoid the crash.
+ *
+ * A matching __wrap_ppCheckIsConnTraffic was tried alongside re-enabling
+ * WIFI_PS_MIN_MODEM after a successful connect, but that combination
+ * produced consistent "auth expired" connect failures on real hardware
+ * even after power save was also forced off (WIFI_PS_NONE) for the whole
+ * duration of the probe/auth/assoc handshake — i.e. neither the timing of
+ * the switch nor the wrap's correctness could be confirmed as the actual
+ * fix. Reverted both (this wrap and the WIFI_PS_MIN_MODEM re-enable in
+ * radio.go) back to the known-working baseline — power save permanently
+ * off — pending isolating the real cause on real hardware. */
 int __wrap_ppCheckTxConnTrafficIdle(void) { return 0; }
 
 /* ROM-fixed pointer variables in the 0x3fcef9xx region that are critical for

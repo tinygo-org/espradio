@@ -626,6 +626,15 @@ func Start() error {
 	// the TX frame queues may be in an inconsistent state when those PM
 	// callbacks run, causing NULL-pointer crashes in ppCheckIsConnTraffic.
 	//
+	// Re-enabling power save (WIFI_PS_MIN_MODEM after a confirmed-successful
+	// Connect(), with both ppCheckTxConnTrafficIdle and ppCheckIsConnTraffic
+	// wrapped to safe stubs) was tried and reverted: it produced consistent
+	// "auth expired" connect failures on real hardware even with power save
+	// also forced to WIFI_PS_NONE for the whole probe/auth/assoc handshake,
+	// so the actual cause is still unidentified — not confirmed to be power
+	// save timing at all. Revisit with real-hardware bisection before trying
+	// again.
+	//
 	// Pump the scheduler so ppTask processes the START command (pp_attach,
 	// ppInitTxq, etc.) and the critical ROM pointer variables (pTxRx,
 	// our_tx_eb, …) get initialised, then snapshot them.
@@ -957,6 +966,69 @@ var (
 	connectResult chan ConnectResult
 )
 
+// ConnEvent describes a change in the STA link state, delivered to the
+// callback registered with SetConnectEventCallback. It fires on every
+// connect/disconnect, including after association (not just during a blocking
+// Connect call), so a firmware can detect the network going down at runtime.
+type ConnEvent struct {
+	Connected bool   // true on association, false on disconnect
+	Reason    uint8  // WIFI_REASON_* code; only meaningful when Connected==false
+	SSID      string // AP SSID (populated on connect)
+	Channel   uint8  // AP channel (populated on connect)
+}
+
+var (
+	eventCbMu   sync.Mutex
+	eventCb     func(ConnEvent)
+	eventCbChan chan ConnEvent
+)
+
+// SetConnectEventCallback registers a callback invoked from the WiFi event
+// path on every STA connect/disconnect. Only one callback is retained; pass
+// nil to clear it. The callback runs in event context (C path via osi.c), so
+// it MUST NOT block; at most signal a channel/flag for a separate goroutine to
+// act on. Use SetConnectEventChan as a non-blocking alternative.
+func SetConnectEventCallback(cb func(ConnEvent)) {
+	if cb == nil {
+		return
+	}
+	eventCbMu.Lock()
+	eventCb = cb
+	eventCbChan = nil
+	eventCbMu.Unlock()
+}
+
+// SetConnectEventChan registers a non-blocking channel that receives ConnEvent
+// on every STA connect/disconnect. Events are dropped (not blocking) when the
+// channel is full. Pass nil to clear it. At most one of callback/channel is
+// active; the most recent registration wins.
+func SetConnectEventChan(ch chan ConnEvent) {
+	eventCbMu.Lock()
+	eventCb = nil
+	eventCbChan = ch
+	eventCbMu.Unlock()
+}
+
+// fireConnectEvent delivers a ConnEvent to whichever sink (callback or
+// channel) is currently registered. Must be called from the event handler; it
+// never blocks the caller.
+func fireConnectEvent(ev ConnEvent) {
+	eventCbMu.Lock()
+	cb := eventCb
+	ch := eventCbChan
+	eventCbMu.Unlock()
+	if cb != nil {
+		cb(ev)
+		return
+	}
+	if ch != nil {
+		select {
+		case ch <- ev:
+		default:
+		}
+	}
+}
+
 // Connect configures STA credentials and initiates association.
 // Blocks until CONNECTED, DISCONNECTED or timeout.
 func Connect(cfg STAConfig) error {
@@ -1022,6 +1094,7 @@ func espradio_on_wifi_event(eventID int32, data unsafe.Pointer) {
 			default:
 			}
 		}
+		fireConnectEvent(ConnEvent{Connected: true, SSID: string(ssid), Channel: uint8(ev.channel)})
 
 	case C.WIFI_EVENT_STA_DISCONNECTED:
 		C.espradio_netif_set_connected(0)
@@ -1035,6 +1108,7 @@ func espradio_on_wifi_event(eventID int32, data unsafe.Pointer) {
 			default:
 			}
 		}
+		fireConnectEvent(ConnEvent{Connected: false, Reason: uint8(ev.reason)})
 
 	case C.WIFI_EVENT_STA_START:
 	}

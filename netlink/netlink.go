@@ -25,6 +25,15 @@ var pollBackoff = lneto.BackoffStrategy(func(_ uint) time.Duration {
 type Esplink struct {
 	params   *nl.ConnectParams
 	notifyCb func(nl.Event)
+	cbMu     sync.Mutex
+
+	ssid     string
+	password string
+
+	eventCh      chan espradio.ConnEvent
+	eventOnce    sync.Once
+	lastReason   uint8
+	lastReasonMu sync.Mutex
 
 	netstack  *espradio.Stack
 	gostack   xnet.StackGo
@@ -44,6 +53,10 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 	if len(params.Ssid) == 0 {
 		return nl.ErrMissingSSID
 	}
+
+	n.ssid = params.Ssid
+	n.password = params.Passphrase
+	n.wireConnectEvents()
 
 	if debug {
 		println("Esplink NetConnect: ssid:", params.Ssid)
@@ -114,8 +127,11 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 
 	n.netstack = espstack
 
-	if n.notifyCb != nil {
-		n.notifyCb(nl.EventNetUp)
+	n.cbMu.Lock()
+	cb := n.notifyCb
+	n.cbMu.Unlock()
+	if cb != nil {
+		cb(nl.EventNetUp)
 	}
 
 	if debug {
@@ -157,7 +173,92 @@ func (n *Esplink) NetDisconnect() {
 
 // NetNotify to register callback for network events
 func (n *Esplink) NetNotify(cb func(nl.Event)) {
+	n.cbMu.Lock()
 	n.notifyCb = cb
+	n.cbMu.Unlock()
+	n.wireConnectEvents()
+}
+
+// wireConnectEvents registers a non-blocking bridge from the espradio STA
+// connect/disconnect events to the netlink notification callback, so a
+// runtime drop of the WiFi link surfaces as nl.EventNetDown. It starts a
+// single drain goroutine (idempotent via eventOnce) and re-registers the
+// espradio channel each time in case the previous registration was cleared.
+func (n *Esplink) wireConnectEvents() {
+	n.eventOnce.Do(func() {
+		n.eventCh = make(chan espradio.ConnEvent, 4)
+		go n.drainConnectEvents()
+	})
+	espradio.SetConnectEventChan(n.eventCh)
+}
+
+func (n *Esplink) drainConnectEvents() {
+	for ev := range n.eventCh {
+		if !ev.Connected {
+			n.lastReasonMu.Lock()
+			n.lastReason = ev.Reason
+			n.lastReasonMu.Unlock()
+		}
+		n.cbMu.Lock()
+		cb := n.notifyCb
+		n.cbMu.Unlock()
+		if cb == nil {
+			continue
+		}
+		if ev.Connected {
+			cb(nl.EventNetUp)
+		} else {
+			cb(nl.EventNetDown)
+		}
+	}
+}
+
+// LastDisconnectReason returns the WIFI_REASON_* code of the most recent
+// STA disconnect, or 0 if none has occurred. Useful for logging why the link
+// dropped before reconnecting.
+func (n *Esplink) LastDisconnectReason() uint8 {
+	n.lastReasonMu.Lock()
+	defer n.lastReasonMu.Unlock()
+	return n.lastReason
+}
+
+// Reconnect re-establishes the WiFi association and DHCP assignment after the
+// link dropped, reusing the already-created netstack. It must NOT be called
+// from the NetNotify callback directly (that runs in event context); spawn a
+// goroutine instead. Only the WiFi association and DHCP are re-run: Enable and
+// Start are one-shot and must not be repeated.
+func (n *Esplink) Reconnect() error {
+	if debug {
+		println("Esplink Reconnect: connecting to WiFi")
+	}
+	if err := espradio.Connect(espradio.STAConfig{
+		SSID:     n.ssid,
+		Password: n.password,
+	}); err != nil {
+		if debug {
+			println("reconnect failed:", err)
+		}
+		return err
+	}
+	if n.netstack == nil {
+		return errNotConnected
+	}
+	if debug {
+		println("Esplink Reconnect: acquiring DHCP")
+	}
+	if _, err := n.netstack.SetupWithDHCP(espradio.DHCPConfig{}); err != nil {
+		if debug {
+			println("reconnect DHCP failed:", err)
+		}
+		return err
+	}
+	n.cbMu.Lock()
+	cb := n.notifyCb
+	n.cbMu.Unlock()
+	if cb != nil {
+		cb(nl.EventNetUp)
+	}
+	return nil
 }
 
 // GetHardwareAddr returns device MAC address
