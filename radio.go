@@ -592,8 +592,16 @@ func Enable(config Config) error {
 	schedOnce()
 	C.espradio_netif_init_netstack_cb()
 
-	// set default transmit level of 20 dBm (100 mW) for ESP32.
-	C.esp_wifi_set_max_tx_power(C.int8_t(20))
+	// Set a conservative static TX-power ceiling as a fallback for any path
+	// that never reaches a successful Connect(). At full power the classic
+	// ESP32's PA saturates and distorts the signal (poor EVM), which makes APs
+	// reject the association as WIFI_REASON_AUTH_EXPIRE ("auth expired") even
+	// with correct credentials and strong RSSI. Connect() re-applies this same
+	// floor before every handshake and only raises it afterward, from the
+	// adaptive value derived from the connected AP's RSSI (see
+	// SetAdaptiveTXPower). This caps the per-rate maxima baked into the PHY
+	// init data table, so no table edit is required.
+	C.esp_wifi_set_max_tx_power(dbmToQuarterDBm(adaptiveTX.minPower))
 
 	return nil
 }
@@ -1029,12 +1037,136 @@ func fireConnectEvent(ev ConnEvent) {
 	}
 }
 
+// ─── Adaptive TX power ────────────────────────────────────────────────────────
+
+// Adaptive TX power sets the STA's maximum transmit power from the signal
+// strength of the associated AP.  At full power the classic ESP32's PA
+// saturates and distorts the signal (poor EVM), which makes APs reject the
+// association as WIFI_REASON_AUTH_EXPIRE ("auth expired") even with correct
+// credentials and strong RSSI.  A nearby AP (strong downlink RSSI) needs far
+// less power, so backing off keeps the link clean.  The adjustment runs once
+// per successful connect, reading the live RSSI of the connected AP.
+var adaptiveTX = struct {
+	enabled  bool
+	minPower int8
+	maxPower int8
+}{enabled: true, minPower: 8, maxPower: 20}
+
+// SetAdaptiveTXPower enables or disables automatic TX-power adjustment and sets
+// the power bounds (dBm) the adjustment may select.  When enabled (the
+// default), Connect() reads the associated AP's RSSI and picks a TX power
+// within the bounds: a strong (nearby) AP gets a low value, a weak AP the
+// upper bound.  Values outside the ESP32's 2-20 dBm range (esp_wifi.h
+// esp_wifi_set_max_tx_power: "range is [8, 84]" in 0.25 dBm units) are
+// clamped.
+//
+// Set it before Connect()/Reconnect(); it is read on the connect path and not
+// synchronized with it, so changing it mid-connect has no defined effect on
+// the in-flight association.
+func SetAdaptiveTXPower(enabled bool, minPower, maxPower int8) {
+	if minPower < 2 {
+		minPower = 2
+	}
+	if maxPower > 20 {
+		maxPower = 20
+	}
+	if minPower > maxPower {
+		minPower = maxPower
+	}
+	adaptiveTX.enabled = enabled
+	adaptiveTX.minPower = minPower
+	adaptiveTX.maxPower = maxPower
+}
+
+// dbmToQuarterDBm converts a whole-dBm power to the 0.25 dBm units
+// esp_wifi_set_max_tx_power actually takes (esp_wifi.h: "Param power unit is
+// 0.25dBm, range is [8, 84] corresponding to 2dBm - 20dBm"), clamping to that
+// hardware-supported range. Passing a raw dBm value here uncorrected — as
+// this file used to — silently asks for a quarter of the intended power.
+func dbmToQuarterDBm(dbm int8) C.int8_t {
+	q := int32(dbm) * 4
+	switch {
+	case q < 8:
+		q = 8
+	case q > 84:
+		q = 84
+	}
+	return C.int8_t(q)
+}
+
+// setTXPowerFloor lowers the max TX power to the conservative floor before an
+// auth/assoc attempt. Called at the start of Connect(), because
+// applyAdaptiveTXPower only runs after a successful association (it needs
+// esp_wifi_sta_get_ap_info, which requires already being associated) — so
+// without this, a reconnect following a prior connection to a weak/distant AP
+// (which raised power toward maxPower) would start its handshake at that
+// stale, still-elevated power instead of the safe floor, reintroducing the
+// same PA-saturation risk this whole mechanism exists to avoid.
+func setTXPowerFloor() {
+	if !adaptiveTX.enabled {
+		return
+	}
+	C.esp_wifi_set_max_tx_power(dbmToQuarterDBm(adaptiveTX.minPower))
+}
+
+// connectedAPRSSI returns the RSSI (dBm) of the currently associated AP, or
+// false if it cannot be queried (not connected / blob rejects the call).
+func connectedAPRSSI() (int8, bool) {
+	C.espradio_ensure_osi_ptr()
+	var rec C.wifi_ap_record_t
+	if code := C.esp_wifi_sta_get_ap_info(&rec); code != C.ESP_OK {
+		return 0, false
+	}
+	return int8(rec.rssi), true
+}
+
+// adaptiveTXPower maps a downlink RSSI to a TX power.  RSSI is reported by the
+// STA and represents the AP's signal as heard on this side, a reliable proxy
+// for distance on a symmetric 2.4 GHz link.
+func adaptiveTXPower(rssi int8) int8 {
+	var p int8
+	switch {
+	case rssi >= -50:
+		p = 8
+	case rssi >= -65:
+		p = 12
+	case rssi >= -75:
+		p = 16
+	default:
+		p = adaptiveTX.maxPower
+	}
+	if p < adaptiveTX.minPower {
+		p = adaptiveTX.minPower
+	}
+	if p > adaptiveTX.maxPower {
+		p = adaptiveTX.maxPower
+	}
+	return p
+}
+
+// applyAdaptiveTXPower reads the connected AP's RSSI and sets the max TX power
+// accordingly.  Called from Connect() on a successful association.
+func applyAdaptiveTXPower() {
+	if !adaptiveTX.enabled {
+		return
+	}
+	rssi, ok := connectedAPRSSI()
+	if !ok {
+		return
+	}
+	C.esp_wifi_set_max_tx_power(dbmToQuarterDBm(adaptiveTXPower(rssi)))
+}
+
 // Connect configures STA credentials and initiates association.
 // Blocks until CONNECTED, DISCONNECTED or timeout.
 func Connect(cfg STAConfig) error {
 	connectMu.Lock()
 	connectResult = make(chan ConnectResult, 1)
 	connectMu.Unlock()
+
+	// Must run before esp_wifi_connect_internal, not just once in Enable():
+	// see setTXPowerFloor's comment for why a reconnect needs this too.
+	setTXPowerFloor()
 
 	code := C.espradio_sta_set_config(
 		C.CString(cfg.SSID), C.int(len(cfg.SSID)),
@@ -1066,6 +1198,7 @@ func Connect(cfg STAConfig) error {
 			if connectReadyAfterPass == 0 {
 				connectReadyAfterPass = readyNeverSentinel
 			}
+			applyAdaptiveTXPower()
 			return nil
 		}
 		return makeError(C.esp_err_t(res.Reason))

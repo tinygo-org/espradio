@@ -156,9 +156,17 @@ static esp_phy_ant_config_t s_phy_ant_config_local = {
     .enabled_ant1 = 1,
 };
 
-/* Static PHY init data blob (128 bytes for ESP32).
- * Values from esp-hal PHY_INIT_DATA_DEFAULT for ESP32.
- * Different from ESP32-S3/C3 — uses different calibration constants.
+/* Static PHY init data blob (128 bytes for ESP32). Verified byte-for-byte
+ * against esp-idf's components/esp_phy/esp32/phy_init_data.c: the first
+ * 44 entries and the tail (indices 50-127) are literal constants there;
+ * indices 44-49 (TX power) are LIMIT(CONFIG_ESP_PHY_MAX_TX_POWER * 4, lo, hi)
+ * with CONFIG_ESP_PHY_MAX_TX_POWER defaulting to 20 (esp_phy/Kconfig), so
+ * val=80 clamps to each entry's hi bound: 78,72,66,60,56,52. Indices
+ * 107-127 aren't listed in esp-idf's initializer at all — C zero-fills the
+ * rest of a partially-initialized array, so they're 0x00 here too.
+ * The Rust esp-wifi-sys crate vendored under esp-wifi/ has no independent
+ * copy of this table; it links against this same esp-idf source.
+ * Different from ESP32-S3/C3 — those use different calibration constants.
  */
 static const esp_phy_init_data_t phy_init_data = { .params = {
     0x03, 0x03, 0x05, 0x09, 0x06, 0x05, 0x03, 0x06,   /*   0 -   7 */
@@ -166,7 +174,7 @@ static const esp_phy_init_data_t phy_init_data = { .params = {
     0x00, 0x05, 0x09, 0x06, 0x05, 0x03, 0x06, 0x05,   /*  16 -  23 */
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,   /*  24 -  31 */
     0xfc, 0xfc, 0xfe, 0xf0, 0xf0, 0xf0, 0xe0, 0xe0,   /*  32 -  39 */
-    0xe0, 0x18, 0x18, 0x18, 0x50, 0x48, 0x42, 0x3c,   /*  40 -  47: TX power */
+    0xe0, 0x18, 0x18, 0x18, 0x4e, 0x48, 0x42, 0x3c,   /*  40 -  47: TX power */
     0x38, 0x34, 0x00, 0x01, 0x01, 0x02, 0x02, 0x03,   /*  48 -  55 */
     0x04, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,   /*  56 -  63 */
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,   /*  64 -  71 */

@@ -68,6 +68,8 @@ func (e Error) Error() string {
 			return "espradio: timeout"
 		case 2:
 			return "espradio: auth expired"
+		case 4:
+			return "espradio: disassociated due to inactivity"
 		case 15:
 			return "espradio: 4-way handshake timeout"
 		case 201:
