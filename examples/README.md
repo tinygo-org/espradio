@@ -183,3 +183,37 @@ incoming connection: 192.168.1.223 from port 53636
 incoming connection: 192.168.1.223 from port 53640
 Got webpage request!
 ```
+
+### ntp-power-save
+
+Syncs the clock with NTP every minute, powering the Wi-Fi radio down with
+`espradio.Stop()` between syncs. This is the pattern for battery-powered apps
+that only need the network occasionally, e.g. a clock: each cycle starts the
+radio, reconnects, gets an IP address with DHCP, syncs the time, then stops the
+radio again. On an ESP32 the radio accounts for roughly 50 mA of system current.
+
+Note that `Stop()` does not undo `Enable()`: the AP association and DHCP lease
+do not survive a stop/start, so each cycle reconnects and runs DHCP again. The
+netdev and the lneto stack are created once and reused by every cycle.
+
+```
+$ tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=yourssid -X main.password=YourPasswordHere" -monitor ./examples/ntp-power-save
+...
+initializing radio...
+starting radio...
+starting L2 netdev...
+creating lneto stack...
+--- sync cycle 1 ---
+connecting to rems ...
+connected to rems !
+starting DHCP...
+got IP: 192.168.1.241
+resolving ntp host: pool.ntp.org
+NTP success: 2026-08-31 12:34:56.789 +0000 UTC
+stopping radio...
+radio stopped.
+radio is down; sleeping 1m0s until next sync
+starting radio...
+--- sync cycle 2 ---
+...
+```

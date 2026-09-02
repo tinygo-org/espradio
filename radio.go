@@ -630,6 +630,7 @@ func Start() error {
 	// ppInitTxq, etc.) and the critical ROM pointer variables (pTxRx,
 	// our_tx_eb, …) get initialised, then snapshot them.
 	postWiFiStart()
+	atomic.StoreUint32(&wifiStarted, 1)
 
 	return nil
 }
@@ -661,6 +662,41 @@ func postWiFiStart() {
 		startReadyAfterPass = readyNeverSentinel
 	}
 	C.espradio_save_rom_ptrs()
+}
+
+// Stop stops the Wi-Fi driver and powers down the radio.  It blocks until the
+// radio stops or a 15-second timeout occurs, in both station and soft-AP
+// mode.  Stop on a driver that is not running is a no-op and returns nil.
+//
+// Stop does not undo Enable(), and a NetDev/Stack pair keeps working across
+// stop/start cycles: reuse them rather than calling StartNetDev/NewStack
+// again (a second StartNetDev resets the netdev's receive handler).  What
+// does not survive a stop is the AP association and the DHCP lease: re-run
+// Connect and SetupWithDHCP after the next Start().
+//
+// The radio API is not safe for concurrent use; the caller must serialize
+// Enable/Start/StartAP/Stop/Connect/Scan.  If Stop returns an error, the
+// driver may still be going down, and Start during that window is undefined.
+func Stop() error {
+	if atomic.LoadUint32(&wifiStarted) == 0 {
+		return nil
+	}
+
+	stopMu.Lock()
+	stopResult = make(chan struct{}, 1)
+	stopMu.Unlock()
+
+	if code := C.esp_wifi_stop(); code != C.ESP_OK {
+		return makeError(code)
+	}
+	atomic.StoreUint32(&wifiStarted, 0)
+
+	select {
+	case <-stopResult:
+		return nil
+	case <-time.After(15 * time.Second):
+		return makeError(C.ESP_ERR_TIMEOUT)
+	}
 }
 
 // DebugISRCount returns the number of WiFi ISR invocations (for debugging).
@@ -955,6 +991,11 @@ func Scan() ([]AccessPoint, error) {
 var (
 	connectMu     sync.Mutex
 	connectResult chan ConnectResult
+	stopMu        sync.Mutex
+	stopResult    chan struct{}
+	// Stop on a never-started driver must be a no-op, not a 15 second wait
+	// for a stop event that will never arrive.
+	wifiStarted uint32
 )
 
 // Connect configures STA credentials and initiates association.
@@ -1036,7 +1077,31 @@ func espradio_on_wifi_event(eventID int32, data unsafe.Pointer) {
 			}
 		}
 
+	case C.WIFI_EVENT_STA_STOP:
+		// The blob may skip WIFI_EVENT_STA_DISCONNECTED on the way down, so
+		// the connected flag cannot be left to it: SendEthFrame gates on
+		// this flag and would keep TX into a stopped driver.
+		C.espradio_netif_set_connected(0)
+		postStopResult()
+
+	case C.WIFI_EVENT_AP_STOP:
+		postStopResult()
+
 	case C.WIFI_EVENT_STA_START:
+	}
+}
+
+// postStopResult wakes a pending Stop().  Both station and soft-AP stop
+// events are accepted, so whichever arrives first completes the wait.
+func postStopResult() {
+	stopMu.Lock()
+	ch := stopResult
+	stopMu.Unlock()
+	if ch != nil {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
 	}
 }
 
@@ -1067,6 +1132,7 @@ func StartAP(cfg APConfig) error {
 
 	// Same post-start sequence as Start().
 	postWiFiStart()
+	atomic.StoreUint32(&wifiStarted, 1)
 
 	return nil
 }
