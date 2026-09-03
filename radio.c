@@ -259,13 +259,15 @@ esp_err_t espradio_wifi_init(void) {
      * == cfg_base (not cfg_base+4), causing memcpy to overwrite cfg.osi_funcs
      * with size=44 and cfg.wpa_crypto_funcs.size with version=1.
      *
-     * Robust fix: align cfg to 256 bytes (>= sizeof(wifi_init_config_t)).
-     * Then cfg_base has its low 8 bits zero, so (cfg_base | offset) equals
-     * (cfg_base + offset) for every field offset (< 256), regardless of which
-     * field the compiler addresses.  aligned(8) was insufficient on ESP32
-     * where higher-offset field writes (bit 3+) could OR back onto offset 0
-     * and zero cfg.osi_funcs. */
-    static wifi_init_config_t cfg __attribute__((aligned(256)));
+     * Robust fix: align cfg to 512 bytes.  Then cfg_base has its low 8 bits
+     * zero, so (cfg_base | offset) equals (cfg_base + offset) for every
+     * field offset (< 256), regardless of which field the compiler
+     * addresses.  aligned(8) was insufficient on ESP32 where higher-offset
+     * field writes (bit 3+) could OR back onto offset 0 and zero
+     * cfg.osi_funcs.  512 also avoids a blob start failure: at
+     * addr % 0x200 == 0x100 each connect fails with
+     * "espradio: auth expired". */
+    static wifi_init_config_t cfg __attribute__((aligned(512)));
     memset(&cfg, 0, sizeof(cfg));
     cfg.osi_funcs              = s_heap_osi_funcs;
     cfg.static_rx_buf_num      = 10;
