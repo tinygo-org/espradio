@@ -6,6 +6,7 @@
 
 #include "espradio.h"
 #include "bt_ble.h"
+#include "soc/interrupts.h"
 #include <stdint.h>
 #include <stdio.h>
 
@@ -79,9 +80,15 @@ uint32_t espradio_bt_cpu_ticks_per_us(void) { return 240u; }
 static volatile uint32_t s_isr_pending_5;
 static volatile uint32_t s_isr_pending_8;
 
+/* The blob asks for the software interrupt through the OSI table. There is no
+ * hardware line behind it, so the tick runs the handler instead. */
+static volatile uint32_t s_isr_pending_7;
+
+void espradio_bt_sw_intr_raise(void) { s_isr_pending_7 = 1; }
+
 /* Diagnostic counts of the interrupts that occurred and that the tick ran. */
 static volatile uint32_t s_isr_fired_5, s_isr_fired_8;
-static volatile uint32_t s_isr_served_5, s_isr_served_8;
+static volatile uint32_t s_isr_served_5, s_isr_served_8, s_isr_served_7;
 
 extern void espradio_bt_ints_off(uint32_t mask);
 extern void espradio_bt_unmask(void);
@@ -104,6 +111,12 @@ void espradio_bt_isr_latch_8(void) {
 /* Run the latched ISRs on the scheduler goroutine stack. The unmask must be
  * explicit, because schedOnce() restores the INTENABLE value from the pass start. */
 void espradio_bt_chip_service_isrs(void) {
+    if (s_isr_pending_7) {
+        s_isr_pending_7 = 0;
+        if (espradio_bt_run_isr(7)) {
+            s_isr_served_7++;
+        }
+    }
     if (s_isr_pending_8) {
         s_isr_pending_8 = 0;
         if (espradio_bt_run_isr(8)) {
@@ -135,8 +148,21 @@ void ld_sco_resched_cbk(void) {}
 
 /* Diagnostics */
 
+/* PRO CPU interrupt matrix map registers. Source N is at base + 4*N.
+ * See ESP-IDF components/soc/esp32/register/soc/dport_reg.h,
+ * DPORT_PRO_MAC_INTR_MAP_REG. */
+#define DPORT_PRO_INTR_MAP(n)  (*(volatile uint32_t *)(0x3FF00104u + 4u * (n)))
+
 void espradio_bt_chip_debug_after_init(void) {
-    BLE_DBG("  pwr_state=%lu\n", (unsigned long)btdm_pwr_state);
+    uint32_t intenable;
+    __asm__ volatile ("rsr %0, intenable" : "=r"(intenable));
+    BLE_DBG("  pwr_state=%lu intenable=0x%08lx\n",
+            (unsigned long)btdm_pwr_state, (unsigned long)intenable);
+    /* Sources 5 BT_BB, 7 RWBT, 8 RWBLE must point at the two CPU lines. */
+    BLE_DBG("  intmap: bt_bb=%lu rwbt=%lu rwble=%lu\n",
+            (unsigned long)DPORT_PRO_INTR_MAP(ETS_BT_BB_INTR_SOURCE),
+            (unsigned long)DPORT_PRO_INTR_MAP(ETS_RWBT_INTR_SOURCE),
+            (unsigned long)DPORT_PRO_INTR_MAP(ETS_RWBLE_INTR_SOURCE));
 }
 
 void espradio_bt_chip_debug_tick(void) {
@@ -147,9 +173,10 @@ void espradio_bt_chip_debug_tick(void) {
 
     /* The fired and served counts must increase together. If served stays
      * constant, the tick does not reach the blob. */
-    BLE_DBG("  isr: fired 5=%lu 8=%lu  served 5=%lu 8=%lu  wake gives=%lu nosem=%lu\n",
+    BLE_DBG("  isr: fired 5=%lu 8=%lu  served 5=%lu 7=%lu 8=%lu  wake gives=%lu nosem=%lu\n",
             (unsigned long)s_isr_fired_5, (unsigned long)s_isr_fired_8,
-            (unsigned long)s_isr_served_5, (unsigned long)s_isr_served_8,
+            (unsigned long)s_isr_served_5, (unsigned long)s_isr_served_7,
+            (unsigned long)s_isr_served_8,
             (unsigned long)espradio_bt_wake_gives(),
             (unsigned long)espradio_bt_wake_nosem());
 }

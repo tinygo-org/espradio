@@ -39,9 +39,13 @@ static void bt_ints_on(unsigned int mask) {
     espradio_bt_unmask();
 }
 
-/* cfg.hli is false, so level 3 is the only level that the blob uses. */
+/* The blob signals itself through the software interrupt. espradio has no
+ * hardware line for it, so the scheduler tick runs the handler. */
+extern void espradio_bt_sw_intr_raise(void);
+
 static int bt_cause_sw_intr_to_core(int core_id, int intr_no) {
     (void)core_id; (void)intr_no;
+    espradio_bt_sw_intr_raise();
     return 0;
 }
 
