@@ -35,6 +35,11 @@ static void       *s_bt_isr_arg_5;
 static bt_isr_fn_t s_bt_isr_fn_8;
 static void       *s_bt_isr_arg_8;
 
+/* The classic ESP32 also registers a handler on the software interrupt. The
+ * ESP32-C3 and the ESP32-S3 do not. */
+static bt_isr_fn_t s_bt_isr_fn_7;
+static void       *s_bt_isr_arg_7;
+
 /* Wake the BT controller task and count the result. The mechanism is not the
  * same on each chip, thus the chip layer does the work. */
 static volatile uint32_t s_task_wake_count;
@@ -75,8 +80,13 @@ static volatile int s_bt_in_isr;
 /* Run one registered blob ISR and then wake the controller task.
  * which is 5 for RWBT and BT_BB, 8 for RWBLE. Returns 0 when none is set. */
 int espradio_bt_run_isr(int which) {
-    bt_isr_fn_t fn = (which == 5) ? s_bt_isr_fn_5 : s_bt_isr_fn_8;
-    void       *arg = (which == 5) ? s_bt_isr_arg_5 : s_bt_isr_arg_8;
+    bt_isr_fn_t fn;
+    void       *arg;
+    switch (which) {
+    case 5:  fn = s_bt_isr_fn_5; arg = s_bt_isr_arg_5; break;
+    case 7:  fn = s_bt_isr_fn_7; arg = s_bt_isr_arg_7; break;
+    default: fn = s_bt_isr_fn_8; arg = s_bt_isr_arg_8; break;
+    }
     if (fn == NULL) {
         return 0;
     }
@@ -268,6 +278,10 @@ static void bt_interrupt_handler_set(int interrupt_no, void (*func)(void *), voi
     case 5:
         s_bt_isr_fn_5 = (bt_isr_fn_t)func;
         s_bt_isr_arg_5 = arg;
+        break;
+    case 7:
+        s_bt_isr_fn_7 = (bt_isr_fn_t)func;
+        s_bt_isr_arg_7 = arg;
         break;
     case 8:
         s_bt_isr_fn_8 = (bt_isr_fn_t)func;
