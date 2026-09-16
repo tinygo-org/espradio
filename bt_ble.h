@@ -30,6 +30,29 @@ uint32_t espradio_bt_cpu_ticks_per_us(void);
 /* Run the blob ISRs that the chip layer deferred. The ESP32-C3 does nothing. */
 void espradio_bt_chip_service_isrs(void);
 
+/* The OSI table that the blob expects. The layout and the version are not the
+ * same on the classic ESP32 as on the ESP32-C3 and the ESP32-S3. */
+const void *espradio_bt_osi_table(void);
+
+/* Enable the modem clock, pulse the BT reset, and tell the ROM the CPU speed.
+ * The registers are in DPORT on the classic ESP32 and in APB_CTRL on the
+ * other chips. */
+void espradio_bt_chip_clocks_up(void);
+
+/* Start the controller. This covers the ROM patches, the config structure, the
+ * PHY, btdm_controller_init and btdm_controller_enable. The order and the
+ * arguments are not the same on each chip. Returns 0 on success. */
+int espradio_bt_chip_controller_bringup(void);
+
+/* Wake the blob controller task. Returns 1 when the task was woken.
+ * The classic ESP32 returns 1 and does nothing, because its task blocks on a
+ * queue that osi.c already releases. */
+int espradio_bt_chip_wake_task(void);
+
+/* Run the blob ke task dispatcher. The classic ESP32 does nothing, because the
+ * symbol is not in its ROM. */
+void espradio_bt_chip_ke_task_schedule(void);
+
 /* Chip diagnostics. These compile to nothing when ESPRADIO_BLE_DEBUG is 0. */
 void espradio_bt_chip_debug_after_init(void);
 void espradio_bt_chip_debug_tick(void);
@@ -44,8 +67,9 @@ int espradio_bt_run_isr(int which);
 uint32_t espradio_bt_wake_gives(void);
 uint32_t espradio_bt_wake_nosem(void);
 
-/* ROM data symbols. TinyGo targets/esp32c3.ld and targets/esp32s3.ld give the
- * addresses, which are different on each chip. */
+/* ROM data symbols. On the ESP32-C3 and the ESP32-S3 the TinyGo linker script
+ * gives the addresses, which are different on each chip. On the classic ESP32
+ * libbtdm_app.a defines them. */
 extern uint32_t rw_sleep_enable;
 extern uint32_t btdm_pwr_state;
 
