@@ -10,7 +10,9 @@ Currently supports WiFi on the following processors:
 - [`esp32c3`](https://www.espressif.com/en/products/socs/esp32-c3) single-core 32-bit RISC-V MCU
 - [`esp32s3`](https://www.espressif.com/en/products/socs/esp32-s3) dual-core XTensa LX7 MCU. 
 
-Bluetooth is now supported on the `esp32c3` and `esp32s3`. Other processors coming soon. See the TinyGo [`bluetooth`](https://github.com/tinygo-org/bluetooth) package for more information.
+Bluetooth Low Energy is now supported on the `esp32`, `esp32c3` and `esp32s3`. Other processors coming soon. See the TinyGo [`bluetooth`](https://github.com/tinygo-org/bluetooth) package for more information.
+
+On the `esp32` the Bluetooth controller needs 64 KB of RAM at a fixed address. TinyGo keeps this memory free only for a program that uses Bluetooth, thus a WiFi program has the full heap.
 
 ## Features
 
