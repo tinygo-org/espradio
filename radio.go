@@ -661,6 +661,34 @@ func postWiFiStart() {
 		startReadyAfterPass = readyNeverSentinel
 	}
 	C.espradio_save_rom_ptrs()
+	atomic.StoreUint32(&wifiStarted, 1)
+	C.espradio_netif_set_tx_enabled(1)
+}
+
+// Stop stops the Wi-Fi driver and powers down the radio.
+// It does nothing if the driver is not started.
+func Stop() error {
+	if atomic.LoadUint32(&wifiStarted) == 0 {
+		return nil
+	}
+
+	C.espradio_netif_set_tx_enabled(0)
+	start := timeUsNow()
+	for C.espradio_netif_tx_busy() != 0 {
+		if !safeGosched() || timeUsNow()-start >= stopTxQuiesceUs {
+			C.espradio_netif_set_tx_enabled(1)
+			return makeError(C.ESP_ERR_TIMEOUT)
+		}
+	}
+
+	if code := C.esp_wifi_stop(); code != C.ESP_OK {
+		C.espradio_netif_set_tx_enabled(1)
+		return makeError(code)
+	}
+
+	C.espradio_netif_set_connected(0)
+	atomic.StoreUint32(&wifiStarted, 0)
+	return nil
 }
 
 // DebugISRCount returns the number of WiFi ISR invocations (for debugging).
@@ -955,6 +983,7 @@ func Scan() ([]AccessPoint, error) {
 var (
 	connectMu     sync.Mutex
 	connectResult chan ConnectResult
+	wifiStarted   uint32
 )
 
 // Connect configures STA credentials and initiates association.
@@ -1035,6 +1064,9 @@ func espradio_on_wifi_event(eventID int32, data unsafe.Pointer) {
 			default:
 			}
 		}
+
+	case C.WIFI_EVENT_STA_STOP:
+		C.espradio_netif_set_connected(0)
 
 	case C.WIFI_EVENT_STA_START:
 	}
@@ -1169,6 +1201,9 @@ func safeGosched() bool {
 // of any kind.  Generous: it should never be reached in normal operation, and
 // hitting it means genuine cross-goroutine contention that is not resolving.
 const mutexLockTimeoutUs = 250_000
+
+// stopTxQuiesceUs is the maximum time Stop waits for active TX to finish.
+const stopTxQuiesceUs = 250_000
 
 //export espradio_task_yield_go
 func espradio_task_yield_go() {

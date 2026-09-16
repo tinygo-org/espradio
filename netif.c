@@ -338,9 +338,14 @@ static esp_err_t espradio_sta_rxcb(void *buffer, uint16_t len, void *eb) {
 
 static wifi_interface_t s_active_if = WIFI_IF_STA;
 static volatile int s_sta_connected;
+static volatile int s_tx_enabled;
 
 void espradio_netif_set_connected(int connected) {
     s_sta_connected = connected;
+}
+
+void espradio_netif_set_tx_enabled(int enabled) {
+    s_tx_enabled = enabled;
 }
 
 esp_err_t espradio_netif_start_rx(int ap_mode) {
@@ -407,6 +412,10 @@ static volatile uint32_t s_tx_retries;
 static volatile uint32_t s_tx_busy_waits;
 static volatile int      s_tx_busy;
 
+int espradio_netif_tx_busy(void) {
+    return s_tx_busy;
+}
+
 /* Hand one frame to the blob, and do not give up on the first NO_MEM.
  *
  * Modelled on espradio_vhci_write, which had to learn the same four things:
@@ -431,6 +440,10 @@ static volatile int      s_tx_busy;
  *   - Serialise writers.  The pump yields, so without a gate a second sender
  *     could enter and interleave with this one. */
 int espradio_netif_tx(void *buf, uint16_t len) {
+    if (!s_tx_enabled) {
+        return ESP_ERR_WIFI_NOT_STARTED;
+    }
+
     if (s_active_if == WIFI_IF_STA && !s_sta_connected) {
         s_tx_not_connected++;
         return ESP_ERR_WIFI_NOT_CONNECT;
@@ -438,8 +451,16 @@ int espradio_netif_tx(void *buf, uint16_t len) {
 
     while (s_tx_busy) {
         s_tx_busy_waits++;
+        if (!s_tx_enabled) {
+            return ESP_ERR_WIFI_NOT_STARTED;
+        }
         espradio_task_yield_go();
     }
+
+    if (!s_tx_enabled) {
+        return ESP_ERR_WIFI_NOT_STARTED;
+    }
+
     s_tx_busy = 1;
 
     espradio_restore_rom_ptrs();

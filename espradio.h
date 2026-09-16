@@ -90,6 +90,8 @@ int       espradio_netif_rx_available(void);
 uint16_t  espradio_netif_rx_pop(void *dst, uint16_t dst_len);
 int       espradio_netif_tx(void *buf, uint16_t len);
 void      espradio_netif_set_connected(int connected);
+void      espradio_netif_set_tx_enabled(int enabled);
+int       espradio_netif_tx_busy(void);
 esp_err_t espradio_netif_get_mac(uint8_t mac[6]);
 uint32_t  espradio_netif_rx_cb_count(void);
 uint32_t  espradio_netif_rx_cb_drop(void);
