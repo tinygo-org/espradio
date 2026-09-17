@@ -1,6 +1,34 @@
 
 ## Examples
 
+### sniff
+
+Puts the radio in monitor mode and counts the 802.11 frames seen on each channel from 1 to 11, then prints a per channel total.
+
+```
+$ tinygo flash -target esp32-mini32 -size short -monitor ./examples/sniff
+   code    data     bss |   flash     ram
+ 506308    8560   25536 |  514868   34096
+...
+ch 1 frames 55
+ch 2 frames 33
+ch 3 frames 17
+...
+```
+
+### inject
+
+Sends a raw 802.11 beacon for SSID `tinygo` from the board own MAC on channel 1 using `SendRawFrame`, then prints both the queue result and the hardware tx done counts.
+
+```
+$ tinygo flash -target esp32-mini32 -size short -monitor ./examples/inject
+   code    data     bss |   flash     ram
+ 508460    8560   25544 |  517020   34104
+...
+beaconing SSID tinygo on channel 1
+queued: 201 refused: 0 hw sent: 200 hw failed: 0
+```
+
 ### mqtt
 
 Uses the MQTT machine to machine protocol to publish and subscribe to messages with the `broker.hivemq.com` test server. Uses the Go stdlib and the [`natiu-mqtt`](github.com/soypat/natiu-mqtt) package with the `netlink` interface.
