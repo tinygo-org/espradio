@@ -62,13 +62,24 @@ void phy_exit_critical(uint32_t level) {
 }
 
 static uint32_t s_phy_i2c_saved_ps;
+static uint32_t s_phy_i2c_nesting;
 
+/* The blob nests these calls, so only the outer pair saves and restores PS.
+ * Otherwise INTLEVEL stays at 3 after BLE init. */
 void phy_i2c_enter_critical(void) {
-    s_phy_i2c_saved_ps = phy_enter_critical();
+    uint32_t ps = phy_enter_critical();
+    if (s_phy_i2c_nesting++ == 0) {
+        s_phy_i2c_saved_ps = ps;
+    }
 }
 
 void phy_i2c_exit_critical(void) {
-    phy_exit_critical(s_phy_i2c_saved_ps);
+    if (s_phy_i2c_nesting == 0) {
+        return;
+    }
+    if (--s_phy_i2c_nesting == 0) {
+        phy_exit_critical(s_phy_i2c_saved_ps);
+    }
 }
 
 /* ---------- PHY ROM function table ----------
