@@ -68,7 +68,7 @@ esp_err_t espradio_sta_set_config(const char *ssid, int ssid_len,
 esp_err_t espradio_sniff_begin(uint8_t channel);
 esp_err_t espradio_sniff_end(void);
 uint32_t espradio_sniff_count(void);
-esp_err_t espradio_send_raw_frame(const void *buf, int len);
+esp_err_t espradio_send_raw_frame(const void *buf, int len, int en_sys_seq);
 esp_err_t espradio_raw_tx_track(void);
 uint32_t espradio_raw_frames_sent(void);
 uint32_t espradio_raw_frames_failed(void);

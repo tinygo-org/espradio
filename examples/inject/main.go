@@ -14,7 +14,7 @@ import (
 
 var ssid = "tinygo"
 
-// beacon builds a minimal open-network 802.11 beacon frame from mac (ref: IEEE 802.11-2020 9.3.3.3).
+// beacon builds a minimal open-network 802.11 beacon frame from mac.
 func beacon(mac [6]byte) []byte {
 	f := make([]byte, 0, 64)
 
@@ -72,7 +72,7 @@ func main() {
 		seq := uint16(i) << 4
 		frame[22] = byte(seq)
 		frame[23] = byte(seq >> 8)
-		if err := espradio.SendRawFrame(frame); err != nil {
+		if err := espradio.SendRawFrame(frame, false); err != nil {
 			refused++
 		} else {
 			queued++

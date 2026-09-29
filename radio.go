@@ -1120,10 +1120,7 @@ func SniffCountOnChannel(channel uint8, duration time.Duration) (uint32, error) 
 	return packets, nil
 }
 
-// BeginMonitor enters promiscuous mode pinned to channel (1 to 13). It owns the
-// radio channel and receive path, so do not scan or connect while it runs. Call
-// EndMonitor to leave. EndMonitor stops promiscuous mode but does not restore
-// the previous channel. ref esp_wifi.h esp_wifi_set_promiscuous
+// BeginMonitor enters promiscuous mode on channel (1 to 13). Do not scan or connect until EndMonitor.
 func BeginMonitor(channel uint8) error {
 	if code := C.espradio_sniff_begin(C.uint8_t(channel)); code != C.ESP_OK {
 		return makeError(code)
@@ -1131,17 +1128,13 @@ func BeginMonitor(channel uint8) error {
 	return nil
 }
 
-// StationMAC returns the 6-byte MAC of the station interface (ref: esp_wifi.h esp_wifi_get_mac)
+// StationMAC returns the 6-byte MAC of the station interface.
 func StationMAC() ([6]byte, error) {
-	var mac [6]byte
-	code := C.esp_wifi_get_mac(C.wifi_interface_t(WiFiInterfaceSTA), (*C.uint8_t)(unsafe.Pointer(&mac[0])))
-	if code != C.ESP_OK {
-		return mac, makeError(code)
-	}
-	return mac, nil
+	mac, err := currentESPNowMAC(WiFiInterfaceSTA)
+	return [6]byte(mac), err
 }
 
-// EndMonitor leaves promiscuous mode entered by BeginMonitor.
+// EndMonitor leaves promiscuous mode. It does not restore the previous channel.
 func EndMonitor() error {
 	if code := C.espradio_sniff_end(); code != C.ESP_OK {
 		return makeError(code)
@@ -1149,8 +1142,7 @@ func EndMonitor() error {
 	return nil
 }
 
-// StartRawTXTracking registers the transmit-complete callback and zeroes the
-// counters. Call again to reset (ref: esp_wifi.h esp_wifi_register_80211_tx_cb).
+// StartRawTXTracking registers the transmit-complete callback and zeroes the counters.
 func StartRawTXTracking() error {
 	if code := C.espradio_raw_tx_track(); code != C.ESP_OK {
 		return makeError(code)
@@ -1168,6 +1160,19 @@ func RawFramesSent() uint32 {
 // StartRawTXTracking call.
 func RawFramesFailed() uint32 {
 	return uint32(C.espradio_raw_frames_failed())
+}
+
+// SendRawFrame queues a complete 802.11 MAC frame. Pass driverSeq true once
+// connected so the driver owns the sequence field, false to set it yourself.
+func SendRawFrame(frame []byte, driverSeq bool) error {
+	if len(frame) < 24 || len(frame) > 1500 {
+		return errors.New("espradio: frame length must be 24 to 1500 bytes")
+	}
+	code := C.espradio_send_raw_frame(unsafe.Pointer(&frame[0]), C.int(len(frame)), C.int(boolToInt(driverSeq)))
+	if code != C.ESP_OK {
+		return makeError(code)
+	}
+	return nil
 }
 
 // ─── Tasks / timers / ISR ────────────────────────────────────────────────────
@@ -1711,20 +1716,4 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
-}
-
-// SendRawFrame transmits a complete 802.11 MAC frame without FCS. The hardware
-// appends the FCS. The frame goes out on the station interface with driver
-// sequence numbering off, so the caller sets the sequence field. A nil error
-// means the frame was queued, not that it left the antenna. The radio must be
-// started. ref esp_wifi.h esp_wifi_80211_tx
-func SendRawFrame(frame []byte) error {
-	if len(frame) == 0 {
-		return errors.New("espradio: empty frame")
-	}
-	code := C.espradio_send_raw_frame(unsafe.Pointer(&frame[0]), C.int(len(frame)))
-	if code != C.ESP_OK {
-		return makeError(code)
-	}
-	return nil
 }
