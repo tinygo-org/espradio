@@ -473,3 +473,27 @@ esp_err_t espradio_sniff_end(void) {
 uint32_t espradio_sniff_count(void) {
     return espradio_sniff_packets;
 }
+
+// See esp_wifi_80211_tx in esp_wifi.h.
+esp_err_t espradio_send_raw_frame(const void *buf, int len, int en_sys_seq) {
+    return esp_wifi_80211_tx(WIFI_IF_STA, buf, len, en_sys_seq != 0);
+}
+
+static volatile uint32_t espradio_tx_ok = 0;
+static volatile uint32_t espradio_tx_fail = 0;
+
+// Runs in the WiFi task on each 802.11 tx completion.
+static void espradio_tx_done_cb(const esp_80211_tx_info_t *info) {
+    if (info->tx_status == WIFI_SEND_SUCCESS) espradio_tx_ok++;
+    else espradio_tx_fail++;
+}
+
+// Registers the tx done callback and zeroes the counters.
+esp_err_t espradio_raw_tx_track(void) {
+    espradio_tx_ok = 0;
+    espradio_tx_fail = 0;
+    return esp_wifi_register_80211_tx_cb(espradio_tx_done_cb);
+}
+
+uint32_t espradio_raw_frames_sent(void) { return espradio_tx_ok; }
+uint32_t espradio_raw_frames_failed(void) { return espradio_tx_fail; }
