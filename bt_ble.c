@@ -154,24 +154,8 @@ static volatile int s_vhci_tx_busy;
  * packet just handed over is actually picked up. */
 static void bt_pump_hci(void);
 
-/* Hand one HCI packet to the controller, and do not return until the
- * controller has taken it.
- *
- * The wait at the end is the important part. The controller has a single HCI
- * input slot, and under the cooperative scheduler nothing runs it between two
- * back-to-back writes -- the 5 ms tick is far away. The host stack emits
- * LE_Set_Advertising_Enable via sendWithoutResponse (which does not wait for
- * the Command Complete) and then, on the Connect -> DiscoverServices path, the
- * first ATT request ~200 us later, both out of its single scratch buffer. The
- * second write reached the slot before the controller had read the first, so
- * the Command Complete for 0x200a never arrived and the controller -- signalled
- * twice but finding the ATT request both times -- transmitted that request
- * twice, which showed up as two Number-Of-Completed-Packets events for one
- * write. The peer received a duplicated request, never answered it, and service
- * discovery timed out.
- *
- * The yields here can reschedule, so a second writer must not enter while a
- * packet is in flight. */
+/* Pump the controller so it takes this packet before the next write, or it can send
+ * the next packet twice. The pump is bounded, so this is best effort. */
 int espradio_vhci_write(const uint8_t *data, int len) {
     if (len <= 0) {
         return 0;

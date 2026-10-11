@@ -32,9 +32,9 @@ extern void r_rwip_prevent_sleep_set(uint32_t prv_slp_bit);
 
 /* ROM functions from libbtdm_app.a */
 extern int  btdm_osi_funcs_register(const void *osi_funcs);
-extern int  btdm_controller_rom_data_init(void);
+extern void btdm_controller_rom_data_init(void);
 extern int  btdm_controller_init(const void *config);
-extern void btdm_controller_enable(uint32_t mode);
+extern int  btdm_controller_enable(uint32_t mode);
 extern void coex_pti_v2(void);
 
 /* Config constants */
@@ -259,7 +259,11 @@ int espradio_bt_chip_controller_bringup(void) {
     BLE_DBG("  coex_pti_v2 done\n");
 
     /* Step 8: Enable BLE mode (blob calls interrupt_handler_set here) */
-    btdm_controller_enable(ESP_BT_MODE_BLE);
+    res = btdm_controller_enable(ESP_BT_MODE_BLE);
+    if (res != 0) {
+        BLE_DBG("  btdm_controller_enable FAILED: %d\n", res);
+        return -2;
+    }
     BLE_DBG("  controller enabled (BLE)\n");
 
     /* Immediately yield to let the controller task run while internal state
