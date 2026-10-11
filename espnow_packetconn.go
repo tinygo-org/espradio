@@ -111,8 +111,10 @@ type Peer struct {
 	closed        bool
 	readDeadline  time.Time
 	writeDeadline time.Time
-	rx            chan espNowInboundPacket
-	done          chan struct{}
+	// readDeadlineSet is closed and replaced when the read deadline changes.
+	readDeadlineSet chan struct{}
+	rx              chan espNowInboundPacket
+	done            chan struct{}
 }
 
 type espNowInboundPacket struct {
@@ -132,29 +134,38 @@ var _ net.PacketConn = (*Peer)(nil)
 // Only one managed ESPNow instance may exist at a time; attempting to create a
 // second one returns ErrESPNowPeerActive.
 func NewESPNow(cfg ESPNowConfig) (*ESPNow, error) {
-	if err := ESPNowInit(); err != nil {
-		return nil, err
-	}
-	if cfg.PrimaryMasterKey != nil {
-		if err := ESPNowSetPrimaryMasterKey(*cfg.PrimaryMasterKey); err != nil {
-			_ = ESPNowDeinit()
-			return nil, err
-		}
-	}
-
 	now := &ESPNow{
 		peers: make(map[ESPNowAddr]*Peer),
 	}
 
 	espNowMu.Lock()
-	defer espNowMu.Unlock()
 	if activeManagedESPNow != nil {
-		_ = ESPNowDeinit()
+		espNowMu.Unlock()
 		return nil, ErrESPNowPeerActive
 	}
 	activeManagedESPNow = now
+	espNowMu.Unlock()
 
+	if err := now.init(cfg); err != nil {
+		espNowMu.Lock()
+		activeManagedESPNow = nil
+		espNowMu.Unlock()
+		return nil, err
+	}
 	return now, nil
+}
+
+func (n *ESPNow) init(cfg ESPNowConfig) error {
+	if err := ESPNowInit(); err != nil {
+		return err
+	}
+	if cfg.PrimaryMasterKey != nil {
+		if err := ESPNowSetPrimaryMasterKey(*cfg.PrimaryMasterKey); err != nil {
+			_ = ESPNowDeinit()
+			return err
+		}
+	}
+	return nil
 }
 
 // Close deinitializes the managed ESP-NOW instance and closes all peers created
@@ -180,13 +191,16 @@ func (n *ESPNow) Close() error {
 		peer.closeLocal()
 	}
 
+	// Deinit before freeing the slot so a new instance cannot init in between.
+	err := ESPNowDeinit()
+
 	espNowMu.Lock()
 	if activeManagedESPNow == n {
 		activeManagedESPNow = nil
 	}
 	espNowMu.Unlock()
 
-	return ESPNowDeinit()
+	return err
 }
 
 // AddPeer adds a remote peer to the SDK peer table and returns a Peer that
@@ -286,12 +300,13 @@ func (n *ESPNow) newPeer(addr ESPNowAddr, iface WiFiInterface) (*Peer, error) {
 		return nil, err
 	}
 	return &Peer{
-		now:       n,
-		addr:      addr,
-		iface:     iface,
-		localAddr: local,
-		rx:        make(chan espNowInboundPacket, espNowPeerQueueDepth),
-		done:      make(chan struct{}),
+		now:             n,
+		addr:            addr,
+		iface:           iface,
+		localAddr:       local,
+		rx:              make(chan espNowInboundPacket, espNowPeerQueueDepth),
+		done:            make(chan struct{}),
+		readDeadlineSet: make(chan struct{}),
 	}, nil
 }
 
@@ -372,31 +387,45 @@ func (p *Peer) ReadFrom(buf []byte) (int, net.Addr, error) {
 		return 0, nil, err
 	}
 
-	deadline := p.getReadDeadline()
-	var timer <-chan time.Time
-	if !deadline.IsZero() {
-		d := time.Until(deadline)
-		if d <= 0 {
-			return 0, nil, os.ErrDeadlineExceeded
+	for {
+		deadline, changed := p.getReadDeadline()
+		var timeout <-chan time.Time
+		var timer *time.Timer
+		if !deadline.IsZero() {
+			d := time.Until(deadline)
+			if d <= 0 {
+				return 0, nil, os.ErrDeadlineExceeded
+			}
+			timer = time.NewTimer(d)
+			timeout = timer.C
 		}
-		timer = time.After(d)
-	}
 
-	select {
-	case pkt, ok := <-p.rx:
-		if ok {
+		select {
+		case pkt, ok := <-p.rx:
+			stopTimer(timer)
+			if !ok {
+				return 0, nil, ErrESPNowClosed
+			}
 			if len(pkt.data) > len(buf) {
 				copy(buf, pkt.data[:len(buf)])
 				return len(buf), pkt.src, io.ErrShortBuffer
 			}
 			copy(buf, pkt.data)
 			return len(pkt.data), pkt.src, nil
+		case <-p.done:
+			stopTimer(timer)
+			return 0, nil, ErrESPNowClosed
+		case <-timeout:
+			return 0, nil, os.ErrDeadlineExceeded
+		case <-changed:
+			stopTimer(timer)
 		}
-		return 0, nil, ErrESPNowClosed
-	case <-p.done:
-		return 0, nil, ErrESPNowClosed
-	case <-timer:
-		return 0, nil, os.ErrDeadlineExceeded
+	}
+}
+
+func stopTimer(t *time.Timer) {
+	if t != nil {
+		t.Stop()
 	}
 }
 
@@ -436,13 +465,9 @@ func (p *Peer) WriteTo(payload []byte, addr net.Addr) (int, error) {
 // instance, but any blocked reads on the peer are unblocked with
 // ErrESPNowClosed.
 func (p *Peer) Close() error {
-	p.mu.Lock()
-	if p.closed {
-		p.mu.Unlock()
+	if !p.closeLocal() {
 		return nil
 	}
-	p.closed = true
-	p.mu.Unlock()
 
 	p.now.mu.Lock()
 	if p.now.peers != nil {
@@ -453,7 +478,6 @@ func (p *Peer) Close() error {
 	}
 	p.now.mu.Unlock()
 
-	p.closeLocal()
 	return ESPNowDeletePeer([ESPNowAddressLength]byte(p.addr))
 }
 
@@ -469,17 +493,24 @@ func (p *Peer) LocalAddr() net.Addr {
 func (p *Peer) SetDeadline(t time.Time) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.readDeadline = t
+	p.setReadDeadlineLocked(t)
 	p.writeDeadline = t
 	return nil
 }
 
-// SetReadDeadline sets the deadline for future ReadFrom calls.
+// SetReadDeadline sets the read deadline. It also applies to a ReadFrom that is
+// already blocked.
 func (p *Peer) SetReadDeadline(t time.Time) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.readDeadline = t
+	p.setReadDeadlineLocked(t)
 	return nil
+}
+
+func (p *Peer) setReadDeadlineLocked(t time.Time) {
+	p.readDeadline = t
+	close(p.readDeadlineSet)
+	p.readDeadlineSet = make(chan struct{})
 }
 
 // SetWriteDeadline sets the deadline checked by future WriteTo calls.
@@ -505,16 +536,19 @@ func (p *Peer) enqueue(pkt espNowInboundPacket) {
 	}
 }
 
-func (p *Peer) closeLocal() {
+// closeLocal marks the peer closed and wakes blocked reads. It reports false
+// if the peer was already closed.
+func (p *Peer) closeLocal() bool {
 	p.mu.Lock()
 	if p.closed {
 		p.mu.Unlock()
-		return
+		return false
 	}
 	p.closed = true
 	done := p.done
 	p.mu.Unlock()
 	close(done)
+	return true
 }
 
 func (p *Peer) checkClosed() error {
@@ -526,10 +560,10 @@ func (p *Peer) checkClosed() error {
 	return nil
 }
 
-func (p *Peer) getReadDeadline() time.Time {
+func (p *Peer) getReadDeadline() (time.Time, <-chan struct{}) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return p.readDeadline
+	return p.readDeadline, p.readDeadlineSet
 }
 
 func (p *Peer) getWriteDeadline() time.Time {

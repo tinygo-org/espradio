@@ -3,6 +3,7 @@ package netlink
 import (
 	"net"
 	"net/netip"
+	"strings"
 	"sync"
 	"time"
 
@@ -114,10 +115,6 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 
 	n.netstack = espstack
 
-	if n.notifyCb != nil {
-		n.notifyCb(nl.EventNetUp)
-	}
-
 	if debug {
 		println("Esplink NetConnect: stack started")
 	}
@@ -144,6 +141,10 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 			println("DHCP failed:", err)
 		}
 		return err
+	}
+
+	if n.notifyCb != nil {
+		n.notifyCb(nl.EventNetUp)
 	}
 	return nil
 }
@@ -180,14 +181,9 @@ func (n *Esplink) GetHostByName(name string) (netip.Addr, error) {
 			println("GetHostByName: empty name")
 		}
 		return netip.Addr{}, errEmptyHostname
-	} else if name[0] >= '0' && name[0] <= '9' {
-		// Special case to try for IPv4 addresses.
-		addr, err := netip.ParseAddr(name)
-		if err != nil {
-			return netip.Addr{}, err
-		}
-
-		return addr, nil
+	}
+	if addr, literal, err := parseIPLiteral(name); literal {
+		return addr, err
 	}
 	rstack := n.rstack()
 	addrs, err := rstack.DoLookupIP(name, 5*time.Second, 3)
@@ -198,6 +194,19 @@ func (n *Esplink) GetHostByName(name string) (netip.Addr, error) {
 		return netip.Addr{}, err
 	}
 	return addrs[0], nil
+}
+
+// parseIPLiteral parses name as an IP address. It reports literal true when name
+// is an address, or only digits and dots, so that names like 9gag.com go to DNS.
+func parseIPLiteral(name string) (addr netip.Addr, literal bool, err error) {
+	addr, err = netip.ParseAddr(name)
+	if err == nil {
+		return addr, true, nil
+	}
+	if strings.Trim(name, "0123456789.") == "" {
+		return netip.Addr{}, true, err
+	}
+	return netip.Addr{}, false, nil
 }
 
 // Addr returns IP address assigned to the interface, either by

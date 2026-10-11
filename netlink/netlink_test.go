@@ -104,3 +104,35 @@ func TestAPParamsWithDefaultsRejectsIPv6(t *testing.T) {
 		t.Errorf("StaticAddr = %v; want %v", got.StaticAddr, want)
 	}
 }
+
+func TestParseIPLiteral(t *testing.T) {
+	tests := []struct {
+		input   string
+		literal bool
+		wantErr bool
+	}{
+		{"192.168.1.1", true, false},
+		{"fe80::1", true, false},
+		{"999.999.999.999", true, true},
+		{"9gag.com", false, false},
+		{"1e100.net", false, false},
+		{"example.com", false, false},
+	}
+	for _, tt := range tests {
+		_, literal, err := parseIPLiteral(tt.input)
+		if literal != tt.literal || (err != nil) != tt.wantErr {
+			t.Errorf("parseIPLiteral(%q) = %v, %v; want literal %v, error %v", tt.input, literal, err, tt.literal, tt.wantErr)
+		}
+	}
+}
+
+func TestAPParamsWithDefaultsDHCPSubnet(t *testing.T) {
+	got := APConnectParams{}.withDefaults()
+	if want := netip.MustParsePrefix("192.168.4.0/24"); got.DHCPSubnet != want {
+		t.Errorf("DHCPSubnet = %v; want %v", got.DHCPSubnet, want)
+	}
+	got = APConnectParams{StaticAddr: netip.MustParseAddr("10.0.0.1")}.withDefaults()
+	if want := netip.MustParsePrefix("10.0.0.0/24"); got.DHCPSubnet != want {
+		t.Errorf("DHCPSubnet = %v; want %v", got.DHCPSubnet, want)
+	}
+}

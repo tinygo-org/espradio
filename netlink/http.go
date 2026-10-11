@@ -37,7 +37,9 @@ func (link *Esplink) ListenAndServe(router *httphi.Router, port uint16) error {
 			if err == net.ErrClosed {
 				return err
 			}
-			println("httphi.Router failed to handle connection: ", err.Error())
+			if debug {
+				println("httphi.Router failed to handle connection: ", err.Error())
+			}
 		}
 	}
 }

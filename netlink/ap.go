@@ -19,7 +19,7 @@ type APConnectParams struct {
 	// Defaults to 192.168.4.1 if not set.
 	StaticAddr netip.Addr
 	// DHCPSubnet is the subnet used by the DHCP server to assign addresses to
-	// connecting clients. Defaults to 192.168.4.0/24 when zero.
+	// connecting clients. Defaults to the /24 that holds StaticAddr.
 	// Ignored when EnableDHCPServer is false.
 	DHCPSubnet netip.Prefix
 	// EnableDHCPServer enables the built-in DHCPv4 server so connecting
@@ -34,12 +34,14 @@ type APConnectParams struct {
 }
 
 // withDefaults returns a copy of params with unset fields populated with their
-// default values: StaticAddr defaults to 192.168.4.1, Hostname falls back to the
-// AP SSID (or defaultHostname when the SSID is empty), and PassivePeers defaults
-// to 255.
+// default values. StaticAddr defaults to 192.168.4.1, DHCPSubnet to the /24 that
+// holds StaticAddr, Hostname to the SSID or defaultHostname, PassivePeers to 64.
 func (params APConnectParams) withDefaults() APConnectParams {
 	if !params.StaticAddr.IsValid() || !params.StaticAddr.Is4() {
 		params.StaticAddr = netip.MustParseAddr("192.168.4.1")
+	}
+	if !params.DHCPSubnet.IsValid() {
+		params.DHCPSubnet = netip.PrefixFrom(params.StaticAddr, 24).Masked()
 	}
 	if params.Hostname == "" {
 		if params.APConfig.SSID != "" {
@@ -123,11 +125,7 @@ func (n *Esplink) NetConnectAP(params APConnectParams) error {
 	espstack.LnetoStack().SetGatewayHardwareAddr([6]byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x01})
 
 	if params.EnableDHCPServer {
-		subnet := params.DHCPSubnet
-		if !subnet.IsValid() {
-			subnet = netip.MustParsePrefix("192.168.4.0/24")
-		}
-		if err := espstack.SetupWithDHCPServer(subnet); err != nil {
+		if err := espstack.SetupWithDHCPServer(params.DHCPSubnet); err != nil {
 			if debug {
 				println("Esplink NetConnectAP: DHCP server failed:", err)
 			}
