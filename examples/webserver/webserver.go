@@ -8,6 +8,7 @@ import (
 	_ "embed"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/soypat/lneto/http/httphi"
@@ -78,7 +79,7 @@ func root(exch *httphi.Exchange) {
 }
 
 func sixlines(exch *httphi.Exchange) {
-	exch.RespondString(httphi.StatusOK, "text/html", indexHTML)
+	exch.RespondString(httphi.StatusOK, "text/html", sixlinesHTML)
 }
 
 const textplain = "text/plain; charset=UTF-8"
@@ -97,7 +98,7 @@ func hello(exch *httphi.Exchange) {
 	exch.RespondString(httphi.StatusOK, textplain, "hello")
 }
 
-var counter int
+var counter atomic.Int64
 
 func cnt(exch *httphi.Exchange) {
 	scratch := scratchPool.Get().([]byte)
@@ -115,12 +116,12 @@ func cnt(exch *httphi.Exchange) {
 		c := form.Get("cnt")
 		if len(c) > 0 {
 			i64, _ := strconv.ParseInt(string(c), 0, 0)
-			counter = int(i64)
-			println("set counter", counter)
+			counter.Store(i64)
+			println("set counter", i64)
 		}
 	}
 	json := append(scratch[:0], `{"cnt": `...)
-	json = strconv.AppendInt(json, int64(counter), 10)
+	json = strconv.AppendInt(json, counter.Load(), 10)
 	json = append(json, '}')
 	exch.Respond(httphi.StatusOK, "application/json", json)
 }

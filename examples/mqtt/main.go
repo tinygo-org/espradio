@@ -55,9 +55,9 @@ func main() {
 	// Create new client
 	client := mqtt.NewClient(mqtt.ClientConfig{
 		Decoder: mqtt.DecoderNoAlloc{make([]byte, 1500)},
-		OnPub: func(_ mqtt.Header, _ mqtt.VariablesPublish, r io.Reader) error {
+		OnPub: func(_ mqtt.Header, vp mqtt.VariablesPublish, r io.Reader) error {
 			message, _ := io.ReadAll(r)
-			fmt.Printf("Message %s received on topic %s\n", string(message), topic)
+			fmt.Printf("Message %s received on topic %s\n", string(message), string(vp.TopicName))
 			return nil
 		},
 	})
@@ -67,21 +67,23 @@ func main() {
 	varconn.SetDefaultMQTT([]byte(clientId))
 	varconn.KeepAlive = 60 // seconds; some brokers reject KeepAlive=0
 	fmt.Println("Sending MQTT CONNECT...")
-	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	err := client.Connect(ctx, conn, &varconn)
+	cancel()
 	if err != nil {
 		failure("failed to connect: " + err.Error())
 	}
 	fmt.Println("MQTT CONNECT succeeded")
 
 	// Subscribe to topic
-	ctx, _ = context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
 	err = client.Subscribe(ctx, mqtt.VariablesSubscribe{
 		PacketIdentifier: 23,
 		TopicFilters: []mqtt.SubscribeRequest{
 			{TopicFilter: []byte(topic), QoS: mqtt.QoS0},
 		},
 	})
+	cancel()
 	if err != nil {
 		failure("failed to subscribe to " + topic + ": " + err.Error())
 	}
@@ -133,7 +135,7 @@ func randomInt(min, max int) int {
 func randomString(len int) string {
 	bytes := make([]byte, len)
 	for i := 0; i < len; i++ {
-		bytes[i] = byte(randomInt(65, 90))
+		bytes[i] = byte(randomInt('A', 'Z'+1))
 	}
 	return string(bytes)
 }

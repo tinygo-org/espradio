@@ -246,7 +246,7 @@ func (sv *Server) handleToggleLED(exch *httphi.Exchange) {
 	exch.Respond(httphi.StatusOK, "", nil)
 }
 
-// ServerState stores the state of the HTTP server. It has a ring buffer with last 8 actions
+// ServerState stores the state of the HTTP server. It has a ring buffer with last 16 actions
 // performed. Every time a new action is performed it replaces the oldest action by advancing the ring buffer.
 type ServerState struct {
 	mu            sync.Mutex

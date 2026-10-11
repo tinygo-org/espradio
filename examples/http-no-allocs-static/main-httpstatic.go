@@ -36,15 +36,6 @@ const (
 	httpConnMemory = 2 * kB
 	listenPort     = 80
 
-	// reqHeaderBuf bounds the request header. The router refuses to grow it, so
-	// a request whose header does not fit is answered 431 instead of eating memory.
-	reqHeaderBuf = 1024
-	// respHeaderBuf is the room for staged response header fields. The status
-	// line does not count towards it and unused request memory is reused.
-	respHeaderBuf = 128
-	// numHeaderFields is how many request header fields are parsed before
-	// answering 431. A browser sends around twenty. Each field costs 8 bytes.
-	numHeaderFields = 32
 	// connDeadline fails the reads/writes of a peer that opens a connection and
 	// then stalls, instead of it holding a router goroutine forever.
 	connDeadline = 8 * time.Second
@@ -54,10 +45,6 @@ var (
 	//go:embed index.html
 	webPage []byte
 )
-
-func setLED(lightOn bool) {
-	// machine.LED.Set(lightOn)
-}
 
 func main() {
 	time.Sleep(time.Second)

@@ -32,7 +32,6 @@ func main() {
 		SSID:     ssid,
 		Password: password,
 		Channel:  6,
-		AuthOpen: true,
 	})
 	if err != nil {
 		failure("ap: start err: " + err.Error())
@@ -69,7 +68,8 @@ func main() {
 		failure("ap: dhcp server configure err: " + err.Error())
 	}
 
-	err = stack.LnetoStack().RegisterUDP4(&dhcpServer, addr.As4(), dhcpv4.DefaultClientPort)
+	// A zero remote address accepts clients that have no IP yet.
+	err = stack.LnetoStack().RegisterUDP4(&dhcpServer, [4]byte{}, dhcpv4.DefaultClientPort)
 	if err != nil {
 		failure("ap: dhcp server register err: " + err.Error())
 	}
