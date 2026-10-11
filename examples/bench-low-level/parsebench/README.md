@@ -4,9 +4,9 @@ Turns a `bench-low-level` run — the device's report stream plus ping's output 
 the host — into a summary, or a side-by-side comparison of two runs.
 
 ```sh
-go run ./build/bench-low-level/parsebench build/bench-new.log build/newping.log
-go run ./build/bench-low-level/parsebench build/bench-old2.log build/oldping.log \
-                                          build/bench-new.log build/newping.log
+go run ./examples/bench-low-level/parsebench build/bench-new.log build/newping.log
+go run ./examples/bench-low-level/parsebench build/bench-old2.log build/oldping.log \
+                                             build/bench-new.log build/newping.log
 ```
 
 Arguments are classified by content, not by position or extension; each ping log

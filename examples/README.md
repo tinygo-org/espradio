@@ -18,7 +18,7 @@ ch 3 frames 17
 
 ### inject
 
-Sends a raw 802.11 beacon for SSID `tinygo` from the board own MAC on channel 1 using `SendRawFrame`, then prints both the queue result and the hardware tx done counts.
+Sends a raw 802.11 beacon for SSID `tinygo` from the board's own MAC on channel 1 using `SendRawFrame`, then prints both the queue result and the hardware tx done counts.
 
 ```
 $ tinygo flash -target esp32-mini32 -size short -monitor ./examples/inject
@@ -31,7 +31,7 @@ queued: 201 refused: 0 hw sent: 200 hw failed: 0
 
 ### mqtt
 
-Uses the MQTT machine to machine protocol to publish and subscribe to messages with the `broker.hivemq.com` test server. Uses the Go stdlib and the [`natiu-mqtt`](github.com/soypat/natiu-mqtt) package with the `netlink` interface.
+Uses the MQTT machine to machine protocol to publish and subscribe to messages with the `broker.hivemq.com` test server. Uses the Go stdlib and the [`natiu-mqtt`](https://github.com/soypat/natiu-mqtt) package with the `netlink` interface.
 
 ```
 $ tinygo flash -target xiao-esp32s3 -ldflags="-X main.ssid=yourssid -X main.password=yourpassword" -size short -monitor ./examples/mqtt/
@@ -64,13 +64,13 @@ $ tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=YourSSID -X main.pass
  695624   22700   90436 |  718324  113136
 ...
 Starting AP...
-HTTP server listening on http://192.168.4.1:80
+Hosting webserver on http://192.168.4.1:80
 ```
 
 ### http-hello
 
 Minimal `httphi` webserver answering `{"message":"hello"}` on `/`. This is the
-[getting started](#getting-started-with-http-hello-example) example.
+[getting started](../README.md#getting-started-with-http-hello-example) example.
 
 ```
 tinygo flash -target xiao-esp32s3 -ldflags="-X main.ssid=yourssid -X main.password=yourpassword" -size short -monitor ./examples/http-hello
@@ -78,7 +78,7 @@ tinygo flash -target xiao-esp32s3 -ldflags="-X main.ssid=yourssid -X main.passwo
 
 ### webserver
 
-![webserver image](./images/webserver.png)
+![webserver image](../images/webserver.png)
 
 Serves an embedded page with `httphi`, driving the on-board LED and a counter
 over `fetch()` from the browser. Shows routing several paths on a
@@ -90,7 +90,7 @@ $ tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=yourssid -X main.pass
  695130   22692   90460 |  717822  113152
 ...
 Connecting to WiFi...
-HTTP server listening on http://192.168.1.46:80
+Hosting webserver on http://192.168.1.46:80
 ```
 
 ### ap
@@ -107,7 +107,7 @@ ap: starting AP...
 ap: starting L2 netdev (AP)...
 ap: creating lneto stack...
 ap: configuring DHCP server...
-ap: AP is running on 192.168.4.1 - connect to tinygo-ap
+ap: AP is running on 192.168.4.1 - connect to tinygoap
 ap: rx_cb= 0 rx_drop= 0
 ap: rx_cb= 0 rx_drop= 0
 ap: rx_cb= 0 rx_drop= 0
@@ -167,7 +167,7 @@ tinygo flash -target xiao-esp32c3 -monitor ./examples/espnow
 ```
 
 ### http-stdlib
-Use the standard library net/http package for hosting a HTTP2 capable server. 
+Use the standard library net/http package for hosting an HTTP/1.1 server.
 
 | ⚠️ User note |
 |---|
@@ -236,4 +236,12 @@ radio is down; sleeping 1m0s until next sync
 starting radio...
 --- sync cycle 2 ---
 ...
+```
+
+### bench-low-level
+
+Measures the driver with no TCP/IP stack in between. It connects to an access point with a static IP, polls the raw `NetDev` and answers ARP and ping in place, then prints timing, heap and arena figures every 5 seconds. See [its README](./bench-low-level/README.md) for how to run it and read the output.
+
+```
+tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=yourssid -X main.password=yourpassword -X main.ip=192.168.1.99" -monitor ./examples/bench-low-level
 ```

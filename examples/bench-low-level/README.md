@@ -67,10 +67,10 @@ packets sent — so its ceiling is still unmeasured. `-f`, `-s 1472` (15× the b
 at the same packet rate; the default 98 B frame never exercises the TX path at
 MTU), or two pingers from separate hosts are the ways to find it.
 
-Analyse with [parsebench](../../build/bench-low-level/parsebench/):
+Analyse with [parsebench](./parsebench/):
 
 ```sh
-go run ./build/bench-low-level/parsebench \
+go run ./examples/bench-low-level/parsebench \
   build/results/bench-old.log build/results/oldping.log \
   build/results/bench-new.log build/results/newping.log
 ```
@@ -103,5 +103,5 @@ advance across a send.
 - `l2echo` — bounce every frame back with the MACs swapped, no protocol parsing.
   Needs a raw-socket sender instead of ping, and answers broadcast, so two boards
   on one AP will echo each other until the channel is full.
-- `espradio_stats` — also dump `espradio.ReadStats()`. Branch-only; the default
-  build compiles against `main`.
+- `espradio_stats` — also dump `espradio.ReadStats()`. The default build leaves it
+  out so it still builds against revisions that predate `ReadStats`.

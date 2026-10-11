@@ -24,9 +24,9 @@ On the `esp32` the Bluetooth controller needs 64 KB of RAM at a fixed address. T
 - TCP and UDP Berkeley sockets API
 - Raw Ethernet frame send/receive
 - MQTT client support (uses [`natiu-mqtt`](https://github.com/soypat/natiu-mqtt))
-- QEMU simulation target for ESP32-C3
+- QEMU target for running unit tests without hardware
 - Heapless HTTP/1.1 server that allocates nothing per request (uses [`httphi`](https://github.com/soypat/lneto/tree/main/http/httphi)). See the [http-hello](./examples/README.md#http-hello) and [webserver](./examples/README.md#webserver) examples.
-- `net/http` availability for HTTP/2 support and compatibility with other projects. Note: We strongly recommend using `httphi` instead of `net/http` for long running programs. See [examples README](./examples/README.md#http-stdlib).
+- `net/http` availability for compatibility with other projects. Note: We strongly recommend using `httphi` instead of `net/http` for long running programs. See [examples README](./examples/README.md#http-stdlib).
 
 ## Getting started with HTTP `hello` example
 We can start a basic HTTP webserver on the [Seeed Studio XIAO-ESP32C3](https://www.seeedstudio.com/Seeed-XIAO-ESP32C3-p-5431.html) using espradio along with the lightweight [`httphi`](https://github.com/soypat/lneto/tree/main/http/httphi) library using the code below. See [the example for all the code](./examples/http-hello/main.go):
@@ -56,7 +56,7 @@ func main() {
 ```
 
 Upload your program to the ESP32 using TinyGo as follows. You'll need to change the command below for the next steps:
-- Set you wifi SSID and password
+- Set your wifi SSID and password
 - Set the correct `target` depending on your Xiao Model! TinyGo cannot distinguish from a S3 or C3:
 	- `-target xiao-esp32c3` for C3
 	- `-target xiao-esp32s3` for S3
@@ -70,7 +70,7 @@ Connected.
 Detected chip: ESP32-S3
 ...
 ```
-If all went well and your ESP32 connected to the router you should see it print out your ESP32's address like so : `HTTP server listening on http://192.168.1.241:80`
+If all went well and your ESP32 connected to the router you should see it print out your ESP32's address like so: `Hosting webserver on http://192.168.1.241:80`
 
 You can now test it by using `curl` or directly accessing the ESP32 via browser at the printed address! 
 
@@ -117,16 +117,16 @@ flowchart TD
 - **ESP32 Radio Hardware** - the on-chip 2.4 GHz radio peripheral.
 
 
-## Updating `esp-wifi-sys`
+## Updating `esp-wifi`
 
-This package uses files from the [`esp-wifi-sys`](https://github.com/esp-rs/esp-wifi-sys) package, then copies the needed ones into the `blobs` directory.
+This package uses files from the [`esp-wifi`](https://github.com/esp-rs/esp-wifi) repository, which is a git submodule. The needed files are copied into the `blobs` directory.
 
-To update these dependencies to the latest version, run the `make update` command. This will update the submodule, then copy the needed files. Then run `make patch-esp32s3` to patch the blobs for the LLD linker. Note that this may break existing functionality requiring changes to TinyGo linker files or other changes.
+To update them to the latest version, run `make update`. This sets up and updates the submodule, copies the needed files, and patches the ESP32 and ESP32-S3 blobs for the LLD linker. The update may break existing functionality and need changes to TinyGo linker files or other code.
 
 ## Debugging
 
 - `netlinkdebug`: enables printing of netlink actions (webserver example)
-- `pcapdebug`: enables logging of all packets sent and received (all examples)
+- `pcapdebug`: enables logging of all packets sent and received by the `espradio.Stack` (examples that use the TCP/IP stack)
 ```sh
 tinygo flash -target=xiao-esp32c3 -tags=netlinkdebug,pcapdebug ./examples/webserver
 ```

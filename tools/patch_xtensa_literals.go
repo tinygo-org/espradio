@@ -18,7 +18,7 @@
 //
 // Usage:
 //
-//	go run fix_xtensa_literals.go [-n] blobs/libs/esp32s3/*.a
+//	go run ./tools/patch_xtensa_literals.go [-n] blobs/libs/esp32s3/*.a
 //
 //go:build ignore
 
