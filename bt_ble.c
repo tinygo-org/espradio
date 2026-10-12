@@ -202,6 +202,7 @@ int espradio_vhci_write(const uint8_t *data, int len) {
 extern void *espradio_semphr_create(uint32_t max, uint32_t init);
 extern void  espradio_semphr_delete(void *semphr);
 extern int32_t espradio_semphr_take(void *semphr, uint32_t block_time_tick);
+extern int32_t espradio_task_ms_to_tick(uint32_t ms);
 extern int32_t espradio_semphr_give(void *semphr);
 extern void *espradio_recursive_mutex_create(void);
 extern void  espradio_mutex_delete(void *mutex);
@@ -320,6 +321,16 @@ static int bt_task_create(void *func, const char *name, uint32_t stack_depth,
 static void bt_task_delete(void *handle) {
     (void)handle;
     BLE_DBG("bt_task_delete: %p (no-op)\n", handle);
+}
+
+/* The BT controller passes a timeout in ms, the WiFi blob passes ticks. */
+static int32_t bt_semphr_take(void *semphr, uint32_t block_time_ms) {
+    uint32_t ticks = OSI_FUNCS_TIME_BLOCKING;
+    if (block_time_ms != OSI_FUNCS_TIME_BLOCKING) {
+        uint64_t t = (uint64_t)block_time_ms * (uint32_t)espradio_task_ms_to_tick(1);
+        ticks = t >= OSI_FUNCS_TIME_BLOCKING ? OSI_FUNCS_TIME_BLOCKING - 1 : (uint32_t)t;
+    }
+    return espradio_semphr_take(semphr, ticks);
 }
 
 /* ─── Semaphore from ISR ─── */

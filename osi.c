@@ -793,7 +793,7 @@ static void espradio_phy_disable(void) {
 static void espradio_phy_enable(void) {
     esp_phy_enable(ESPRADIO_PHY_MODEM_WIFI);
     phy_wifi_enable_set(1);
-#ifdef __XTENSA__
+#if defined(__XTENSA__) && !CONFIG_IDF_TARGET_ESP32
     /* PHY blob may re-enable glitch/brownout detectors; re-disable them. */
     *(volatile uint32_t *)0x60008034 &= ~(1u << 20);        /* GLITCH_RST_EN=0 */
     *(volatile uint32_t *)0x60008148 = 0x0;                  /* FIB_SEL=0 (use register, not eFuse) */
@@ -1262,13 +1262,15 @@ static int espradio_get_time(void *t) {
     if (!t) {
         return -1;
     }
+    /* Same layout as struct os_time in the blobs, with a 64 bit time_t. */
     struct espradio_os_time {
-        int32_t sec;
+        int64_t sec;
         int32_t usec;
     };
+    _Static_assert(__builtin_offsetof(struct espradio_os_time, usec) == 8, "os_time layout");
     uint64_t us = espradio_time_us_now();
     struct espradio_os_time *ot = (struct espradio_os_time *)t;
-    ot->sec = (int32_t)(us / 1000000ULL);
+    ot->sec = (int64_t)(us / 1000000ULL);
     ot->usec = (int32_t)(us % 1000000ULL);
     return 0;
 }

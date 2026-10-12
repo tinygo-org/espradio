@@ -80,6 +80,7 @@ void espradio_arena_init(uint8_t *base, size_t cap) {
 
 void *espradio_arena_alloc(size_t size) {
     if (size == 0) size = 1;
+    if (size > arena_cap) return NULL;
     /* Round payload up to alignment */
     size = (size + ALIGN - 1) & ~(size_t)(ALIGN - 1);
     size_t need = size + OVERHEAD;
@@ -121,6 +122,7 @@ void *espradio_arena_alloc(size_t size) {
 }
 
 void *espradio_arena_calloc(size_t n, size_t size) {
+    if (size != 0 && n > SIZE_MAX / size) return NULL;
     size_t total = n * size;
     void *p = espradio_arena_alloc(total);
     if (p) memset(p, 0, total);
@@ -142,6 +144,11 @@ void espradio_arena_free(void *p) {
         return;
     }
 
+    if (!BLK_ALLOC(blk)) {
+        ARENA_DBG("arena: double free %p ignored\n", p);
+        return;
+    }
+
     size_t bsz = BLK_SIZE(blk);
 
     /* Sanity-check the block header. */
@@ -151,6 +158,9 @@ void espradio_arena_free(void *p) {
     }
 
     ARENA_DBG("arena: free %p (blk %p, size %zu)\n", p, blk, bsz);
+
+    /* Clear the alloc bit first so a second free is caught after coalescing. */
+    BLK_HDR(blk) = bsz;
 
     /* Coalesce with next block */
     uint8_t *next = blk + bsz;

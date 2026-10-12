@@ -85,6 +85,10 @@ static void espradio_bt_irq_stub(void *arg) {
 }
 
 static void espradio_bt_irq_prewire(void) {
+#ifdef __XTENSA__
+    /* CPU lines 28 to 30 are not BT lines on Xtensa. BLE init routes BT to 13 and 17. */
+    return;
+#endif
     if (s_bt_irq_wired) {
         return;
     }
@@ -129,6 +133,8 @@ void espradio_rom_hooks_init(void) {
  * entire RTC domain.  ESP-IDF disables these during normal startup. */
 static void espradio_disable_all_wdt(void) {
 #ifdef __XTENSA__
+#if !CONFIG_IDF_TARGET_ESP32
+    /* These RTC_CNTL offsets are for the S3. On the ESP32 they are STORE registers. */
     /* --- Clock glitch detector --- */
     /* RTC_CNTL_ANA_CONF_REG = 0x60008034, bit 20 = GLITCH_RST_EN */
     *(volatile uint32_t *)0x60008034 &= ~(1u << 20);        /* GLITCH_RST_EN=0 */
@@ -161,20 +167,21 @@ static void espradio_disable_all_wdt(void) {
     *(volatile uint32_t *)0x600080B0 = 0x50D83AA1;          /* unlock */
     *(volatile uint32_t *)0x60008098 &= ~(1u << 31);        /* WDT_EN=0 */
     *(volatile uint32_t *)0x600080B0 = 0;                   /* re-lock */
+#endif
 
-    /* --- Timer Group 0 MWDT --- */
-    /* TIMG_WDTWPROTECT_REG(0) = 0x6001F064, key = 0x50D83AA1 */
-    /* TIMG_WDTCONFIG0_REG(0)  = 0x6001F048, bit 31 = WDT_EN */
-    *(volatile uint32_t *)0x6001F064 = 0x50D83AA1;          /* unlock */
-    *(volatile uint32_t *)0x6001F048 &= ~(1u << 31);        /* WDT_EN=0 */
-    *(volatile uint32_t *)0x6001F064 = 0;                   /* re-lock */
-
-    /* --- Timer Group 1 MWDT --- */
-    /* TIMG_WDTWPROTECT_REG(1) = 0x60020064, key = 0x50D83AA1 */
-    /* TIMG_WDTCONFIG0_REG(1)  = 0x60020048, bit 31 = WDT_EN */
-    *(volatile uint32_t *)0x60020064 = 0x50D83AA1;          /* unlock */
-    *(volatile uint32_t *)0x60020048 &= ~(1u << 31);        /* WDT_EN=0 */
-    *(volatile uint32_t *)0x60020064 = 0;                   /* re-lock */
+    /* --- Timer Group 0 and 1 MWDT --- */
+    /* TIMG_WDTWPROTECT_REG = base + 0x64, key = 0x50D83AA1 */
+    /* TIMG_WDTCONFIG0_REG  = base + 0x48, bit 31 = WDT_EN */
+#if CONFIG_IDF_TARGET_ESP32
+    static const uint32_t timg_base[] = { 0x3FF5F000, 0x3FF60000 };
+#else
+    static const uint32_t timg_base[] = { 0x6001F000, 0x60020000 };
+#endif
+    for (int i = 0; i < 2; i++) {
+        *(volatile uint32_t *)(timg_base[i] + 0x64) = 0x50D83AA1;  /* unlock */
+        *(volatile uint32_t *)(timg_base[i] + 0x48) &= ~(1u << 31); /* WDT_EN=0 */
+        *(volatile uint32_t *)(timg_base[i] + 0x64) = 0;           /* re-lock */
+    }
 
 #else /* RISC-V (ESP32-C3) — different RTC_CNTL offsets, same TIMG offsets */
 
@@ -420,8 +427,8 @@ esp_err_t espradio_sta_set_config(const char *ssid, int ssid_len,
     }
     wifi_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
-    memcpy(cfg.sta.ssid, ssid, ssid_len);
-    memcpy(cfg.sta.password, pwd, pwd_len);
+    if (ssid_len) memcpy(cfg.sta.ssid, ssid, ssid_len);
+    if (pwd_len) memcpy(cfg.sta.password, pwd, pwd_len);
     if (pwd_len > 0)
         cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
     return esp_wifi_set_config(WIFI_IF_STA, &cfg);
@@ -435,9 +442,9 @@ esp_err_t espradio_ap_set_config(const char *ssid, int ssid_len,
     }
     wifi_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
-    memcpy(cfg.ap.ssid, ssid, ssid_len);
+    if (ssid_len) memcpy(cfg.ap.ssid, ssid, ssid_len);
     cfg.ap.ssid_len = (uint8_t)ssid_len;
-    memcpy(cfg.ap.password, pwd, pwd_len);
+    if (pwd_len) memcpy(cfg.ap.password, pwd, pwd_len);
     cfg.ap.channel = channel ? channel : 1;
     cfg.ap.max_connection = 4;
     cfg.ap.authmode = (auth_open || pwd_len == 0) ? WIFI_AUTH_OPEN : WIFI_AUTH_WPA2_PSK;

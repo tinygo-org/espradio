@@ -592,9 +592,6 @@ func Enable(config Config) error {
 	schedOnce()
 	C.espradio_netif_init_netstack_cb()
 
-	// set default transmit level of 20 dBm (100 mW) for ESP32.
-	C.esp_wifi_set_max_tx_power(C.int8_t(20))
-
 	return nil
 }
 
@@ -986,6 +983,12 @@ var (
 	wifiStarted   uint32
 )
 
+// stringData passes string bytes to C without a copy. The C side copies them
+// by length, so no NUL and no C allocation is needed.
+func stringData(s string) *C.char {
+	return (*C.char)(unsafe.Pointer(unsafe.StringData(s)))
+}
+
 // Connect configures STA credentials and initiates association.
 // Blocks until CONNECTED, DISCONNECTED or timeout.
 func Connect(cfg STAConfig) error {
@@ -994,8 +997,8 @@ func Connect(cfg STAConfig) error {
 	connectMu.Unlock()
 
 	code := C.espradio_sta_set_config(
-		C.CString(cfg.SSID), C.int(len(cfg.SSID)),
-		C.CString(cfg.Password), C.int(len(cfg.Password)),
+		stringData(cfg.SSID), C.int(len(cfg.SSID)),
+		stringData(cfg.Password), C.int(len(cfg.Password)),
 	)
 	if code != C.ESP_OK {
 		return makeError(code)
@@ -1085,8 +1088,8 @@ func StartAP(cfg APConfig) error {
 		ssid = "espradio-ap"
 	}
 	code := C.espradio_ap_set_config(
-		C.CString(ssid), C.int(len(ssid)),
-		C.CString(cfg.Password), C.int(len(cfg.Password)),
+		stringData(ssid), C.int(len(ssid)),
+		stringData(cfg.Password), C.int(len(cfg.Password)),
 		C.uint8_t(cfg.Channel), C.int(boolToInt(cfg.AuthOpen)),
 	)
 	if code != C.ESP_OK {
@@ -1179,6 +1182,10 @@ func SendRawFrame(frame []byte, driverSeq bool) error {
 
 func millisecondsToTicks(ms uint32) uint32 {
 	return ms * (ticksPerSecond / 1000)
+}
+
+func ticksToMicroseconds(ticks uint32) uint64 {
+	return uint64(ticks) * 1_000_000 / ticksPerSecond
 }
 
 //export espradio_panic
@@ -1499,7 +1506,7 @@ func espradio_event_group_wait_bits(ptr unsafe.Pointer, bitsToWaitFor uint32, cl
 	startUs := timeUsNow()
 	var timeoutUs uint64
 	if !forever {
-		timeoutUs = uint64(blockTimeTick) * 1000
+		timeoutUs = ticksToMicroseconds(blockTimeTick)
 	}
 
 	var snapshot uint32
@@ -1615,7 +1622,7 @@ func espradio_semphr_take(semphr unsafe.Pointer, block_time_tick uint32) int32 {
 	startUs := timeUsNow()
 	var timeoutUs uint64
 	if !forever {
-		timeoutUs = uint64(block_time_tick) * 1000
+		timeoutUs = ticksToMicroseconds(block_time_tick)
 	}
 
 	for {

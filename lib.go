@@ -17,7 +17,10 @@ extern esp_err_t esp_wifi_disconnect_internal(void);
 */
 import "C"
 
-import "unsafe"
+import (
+	"time"
+	"unsafe"
+)
 
 // Gap-fillers for symbols the WiFi blobs and libwpa_supplicant link against but
 // that picolibc and TinyGo do not provide. Every one of these is an undefined
@@ -28,41 +31,43 @@ import "unsafe"
 
 // ─── Time ────────────────────────────────────────────────────────────────────
 
-// gettimeofday fills a struct timeval. Only the two 32-bit fields the blob
-// reads are written; tz is ignored, as it is by the IDF.
+// gettimeofday fills a struct timeval. The blobs use a 64 bit time_t, so sec is
+// at offset 0 and usec at offset 8. tz is ignored, as it is by the IDF.
 //
 //export gettimeofday
 func gettimeofday(tv, tz unsafe.Pointer) int32 {
 	if tv != nil {
 		us := espradio_time_us_now()
-		*(*uint32)(tv) = uint32(us / 1000000)
-		*(*uint32)(unsafe.Add(tv, 4)) = uint32(us % 1000000)
+		*(*uint64)(tv) = us / 1000000
+		*(*uint32)(unsafe.Add(tv, 8)) = uint32(us % 1000000)
 	}
 	return 0
 }
 
-// sleep and usleep both round up to at least one tick: the blob uses them as
-// yield points, and a zero-tick delay would spin.
+// sleep and usleep wait at least 1 ms, since the blob uses them as yield points.
 
 //export sleep
 func sleep(secs uint32) uint32 {
-	espradio_task_delay(secs * 100)
+	blobSleep(time.Duration(secs) * time.Second)
 	return 0
 }
 
 //export usleep
 func usleep(us uint32) int32 {
-	ticks := us / 10000
-	if ticks == 0 {
-		ticks = 1
-	}
-	espradio_task_delay(ticks)
+	blobSleep(time.Duration(us) * time.Microsecond)
 	return 0
 }
 
+// freertosTickPeriod matches CONFIG_FREERTOS_HZ 100 that the blobs are built with.
+const freertosTickPeriod = 10 * time.Millisecond
+
 //export vTaskDelay
 func vTaskDelay(ticks uint32) {
-	espradio_task_delay(ticks)
+	blobSleep(time.Duration(ticks) * freertosTickPeriod)
+}
+
+func blobSleep(d time.Duration) {
+	time.Sleep(max(d, time.Millisecond))
 }
 
 // esp_timer_get_time is deliberately absent here: esp_timer_shim.c carries a
