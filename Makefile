@@ -11,14 +11,11 @@ UNUSED_HEADERS = esp32c2 esp32c5 esp32c6 esp32c61 esp32h2 esp32s2 nimble \
 	esp_wps.h smartconfig_ack.h esp_xt_wdt.h
 
 update: update-esp-wifi
-	rm -rf blobs/local.keep
-	mv blobs/include/local blobs/local.keep
-	rm -rf blobs/include
+	find blobs/include -mindepth 1 -maxdepth 1 ! -name local -exec rm -rf {} +
 	rm -rf blobs/libs
 	mkdir -p blobs/libs
-	cp -rp esp-wifi/c/include      blobs
+	cp -rp esp-wifi/c/include/. blobs/include
 	cd blobs/include && rm -rf $(UNUSED_HEADERS)
-	mv blobs/local.keep blobs/include/local
 	cp -rp esp-wifi/esp-wifi-sys-esp32/libs  blobs/libs/esp32
 	cp -rp esp-wifi/esp-wifi-sys-esp32c3/libs blobs/libs/esp32c3
 	cp -rp esp-wifi/esp-wifi-sys-esp32s3/libs blobs/libs/esp32s3
