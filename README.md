@@ -26,7 +26,7 @@ On the `esp32` the Bluetooth controller needs 64 KB of RAM at a fixed address. T
 - MQTT client support (uses [`natiu-mqtt`](https://github.com/soypat/natiu-mqtt))
 - QEMU target for running unit tests without hardware
 - Heapless HTTP/1.1 server that allocates nothing per request (uses [`httphi`](https://github.com/soypat/lneto/tree/main/http/httphi)). See the [http-hello](./examples/README.md#http-hello) and [webserver](./examples/README.md#webserver) examples.
-- `net/http` availability for compatibility with other projects. Note: We strongly recommend using `httphi` instead of `net/http` for long running programs. See [examples README](./examples/README.md#http-stdlib).
+- `net/http` availability for compatibility with other projects. We strongly recommend using `httphi` instead of `net/http` for long running programs. See [examples README](./examples/README.md#http-stdlib).
 
 ## Getting started with HTTP `hello` example
 We can start a basic HTTP webserver on the [Seeed Studio XIAO-ESP32C3](https://www.seeedstudio.com/Seeed-XIAO-ESP32C3-p-5431.html) using espradio along with the lightweight [`httphi`](https://github.com/soypat/lneto/tree/main/http/httphi) library using the code below. See [the example for all the code](./examples/http-hello/main.go):
@@ -70,7 +70,11 @@ Connected.
 Detected chip: ESP32-S3
 ...
 ```
-If all went well and your ESP32 connected to the router you should see it print out your ESP32's address like so: `Hosting webserver on http://192.168.1.241:80`
+If all went well and your ESP32 connected to the router you should see it print out your ESP32's address like this.
+
+```
+Hosting webserver on http://192.168.1.241:80
+```
 
 You can now test it by using `curl` or directly accessing the ESP32 via browser at the printed address! 
 

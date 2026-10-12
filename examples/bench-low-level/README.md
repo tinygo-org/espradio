@@ -100,8 +100,8 @@ advance across a send.
 
 ## Build tags
 
-- `l2echo` — bounce every frame back with the MACs swapped, no protocol parsing.
+- `l2echo` bounces every frame back with the MACs swapped, no protocol parsing.
   Needs a raw-socket sender instead of ping, and answers broadcast, so two boards
   on one AP will echo each other until the channel is full.
-- `espradio_stats` — also dump `espradio.ReadStats()`. The default build leaves it
+- `espradio_stats` also dumps `espradio.ReadStats()`. The default build leaves it
   out so it still builds against revisions that predate `ReadStats`.
