@@ -7,7 +7,7 @@ package main
 // The point of doing this by hand rather than importing lneto's icmp package is
 // that the benchmark's dependency list is part of what it measures: every package
 // linked in is more static RAM, which is heap the GC does not get, and more code
-// between EthPoll and SendEthFrame than the driver itself.  Answering two protocols
+// between EthPoll and SendOffsetEthFrame than the driver itself.  Answering two protocols
 // badly is enough to make ping work, and ping is the load generator.
 //
 // Nothing here allocates, and nothing here copies the frame -- the reply is the
@@ -16,7 +16,7 @@ package main
 
 const (
 	ethHdrLen     = 14
-	minEthFrame   = 60 // SendEthFrame's documented minimum, CRC excluded.
+	minEthFrame   = 60 // SendOffsetEthFrame's documented minimum, CRC excluded.
 	etherTypeIPv4 = 0x0800
 	etherTypeARP  = 0x0806
 )

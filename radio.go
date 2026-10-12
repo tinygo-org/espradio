@@ -10,6 +10,8 @@ package espradio
 #cgo CFLAGS: -fno-short-enums
 
 #include "espradio.h"
+
+extern esp_err_t esp_wifi_disconnect_internal(void);
 */
 import "C"
 import (
@@ -980,6 +982,7 @@ func Scan() ([]AccessPoint, error) {
 var (
 	connectMu     sync.Mutex
 	connectResult chan ConnectResult
+	staLinkUp     bool
 	wifiStarted   uint32
 )
 
@@ -994,7 +997,13 @@ func stringData(s string) *C.char {
 func Connect(cfg STAConfig) error {
 	connectMu.Lock()
 	connectResult = make(chan ConnectResult, 1)
+	staLinkUp = false
 	connectMu.Unlock()
+	defer func() {
+		connectMu.Lock()
+		connectResult = nil
+		connectMu.Unlock()
+	}()
 
 	code := C.espradio_sta_set_config(
 		stringData(cfg.SSID), C.int(len(cfg.SSID)),
@@ -1026,6 +1035,9 @@ func Connect(cfg STAConfig) error {
 			if connectReadyAfterPass == 0 {
 				connectReadyAfterPass = readyNeverSentinel
 			}
+			connectMu.Lock()
+			staLinkUp = true
+			connectMu.Unlock()
 			return nil
 		}
 		return makeError(C.esp_err_t(res.Reason))
@@ -1045,34 +1057,77 @@ func espradio_on_wifi_event(eventID int32, data unsafe.Pointer) {
 			ssidLen = 32
 		}
 		ssid := C.GoBytes(unsafe.Pointer(&ev.ssid[0]), C.int(ssidLen))
-		connectMu.Lock()
-		ch := connectResult
-		connectMu.Unlock()
-		if ch != nil {
-			select {
-			case ch <- ConnectResult{Connected: true, SSID: string(ssid), Channel: uint8(ev.channel)}:
-			default:
-			}
-		}
+		reportConnect(ConnectResult{Connected: true, SSID: string(ssid), Channel: uint8(ev.channel)})
 
 	case C.WIFI_EVENT_STA_DISCONNECTED:
 		C.espradio_netif_set_connected(0)
 		ev := (*C.wifi_event_sta_disconnected_t)(data)
-		connectMu.Lock()
-		ch := connectResult
-		connectMu.Unlock()
-		if ch != nil {
-			select {
-			case ch <- ConnectResult{Connected: false, Reason: uint8(ev.reason)}:
-			default:
-			}
-		}
+		reportConnect(ConnectResult{Connected: false, Reason: uint8(ev.reason)})
 
 	case C.WIFI_EVENT_STA_STOP:
 		C.espradio_netif_set_connected(0)
 
 	case C.WIFI_EVENT_STA_START:
 	}
+}
+
+// reportConnect sends res to an active Connect call. Otherwise it sends link
+// up or down changes to the link notify callback.
+func reportConnect(res ConnectResult) {
+	connectMu.Lock()
+	ch := connectResult
+	if ch == nil {
+		if staLinkUp == res.Connected {
+			connectMu.Unlock()
+			return
+		}
+		staLinkUp = res.Connected
+		ch = linkEvents
+	}
+	connectMu.Unlock()
+	select {
+	case ch <- res:
+	default:
+	}
+}
+
+// Disconnect disconnects the station from its access point.
+func Disconnect() error {
+	if code := C.esp_wifi_disconnect_internal(); code != C.ESP_OK {
+		return makeError(code)
+	}
+	return nil
+}
+
+var (
+	linkMu       sync.Mutex
+	linkNotifyCb func(connected bool)
+	linkEvents   chan ConnectResult
+)
+
+// SetLinkNotify sets a callback for station connects and disconnects that happen
+// outside a Connect call. The callback runs on its own goroutine.
+func SetLinkNotify(cb func(connected bool)) {
+	linkMu.Lock()
+	defer linkMu.Unlock()
+	linkNotifyCb = cb
+	if linkEvents != nil {
+		return
+	}
+	events := make(chan ConnectResult, 4)
+	go func() {
+		for res := range events {
+			linkMu.Lock()
+			cb := linkNotifyCb
+			linkMu.Unlock()
+			if cb != nil {
+				cb(res.Connected)
+			}
+		}
+	}()
+	connectMu.Lock()
+	linkEvents = events
+	connectMu.Unlock()
 }
 
 // ─── Soft-AP ─────────────────────────────────────────────────────────────────

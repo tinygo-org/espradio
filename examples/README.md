@@ -139,6 +139,14 @@ alive
 ...
 ```
 
+### netdev
+
+Connects with `espradio.Link` and runs an lneto stack using the lneto `x/netdev` Interface and Runner. It reconnects when the access point drops the link.
+
+```
+$ tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=yourssid -X main.password=YourPasswordHere" -monitor ./examples/netdev
+```
+
 ### scan
 
 Scans for WiFi access points.

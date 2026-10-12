@@ -86,7 +86,7 @@ Every 5 s. Interval figures reset, cumulative ones do not.
 |---|---|
 | `bench` | cumulative rx/tx frames and bytes, unanswered, errors |
 | `saw` | frame classification — says *why* a quiet log is quiet |
-| `svc[ns]` | `EthPoll` handing over a frame until `SendEthFrame` returns: the TX path, nothing else |
+| `svc[ns]` | `EthPoll` handing over a frame until `SendOffsetEthFrame` returns: the TX path, nothing else |
 | `svc<ns` | octave histogram of the above |
 | `idle[ns]` | period of a loop iteration that found no frame. Asks for 1 ms; the excess is scheduler overhead |
 | `inter[ns]` | arrival to arrival — the offered load, to show two runs were driven alike |

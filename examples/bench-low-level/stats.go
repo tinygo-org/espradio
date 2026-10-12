@@ -78,7 +78,7 @@ func (l *lat) avg() int64 {
 func (l *lat) reset() { *l = lat{} }
 
 var (
-	// service is EthPoll handing over a frame until SendEthFrame returns: the TX
+	// service is EthPoll handing over a frame until SendOffsetEthFrame returns: the TX
 	// path with nothing else in it.
 	service lat
 	// idlePeriod is the wall period of a loop iteration that found no frame.  It

@@ -3,6 +3,7 @@ package espradio
 import (
 	"errors"
 	"net/netip"
+	"sync/atomic"
 	"time"
 
 	"github.com/soypat/lneto"
@@ -17,7 +18,7 @@ var (
 	errDHCPNoStaticAddr  = errors.New("dhcp server: stack has no static IPv4 address")
 )
 
-// Stack wraps an lneto async network stack on top of a NetDev (EthernetDevice).
+// Stack wraps an lneto async network stack on top of a NetDev.
 type Stack struct {
 	s       xnet.StackAsync
 	dev     *NetDev
@@ -89,9 +90,6 @@ func NewStack(dev *NetDev, cfg StackConfig) (*Stack, error) {
 		// ARP learning works without an explicit subnet.
 		stack.s.SetSubnet4(cfg.StaticAddress.As4(), 24)
 	}
-	dev.SetEthRecvHandler(func(pkt []byte) error {
-		return stack.s.IngressEthernet(pkt)
-	})
 	stack.rxtxBuf = make([]byte, MTU+ethernet.MaxOverheadSize)
 	return stack, nil
 }
@@ -109,9 +107,16 @@ func (stack *Stack) Hostname() string {
 // RecvAndSend polls the device for received frames and sends any pending
 // outgoing frames. Returns the number of bytes sent and received.
 func (stack *Stack) RecvAndSend() (send, recv int, err error) {
-	recv, errrecv := stack.dev.EthPoll(stack.rxtxBuf)
-	if pcapdebug && recv > 0 {
-		printPacket("IN", stack.rxtxBuf[:recv])
+	off, recv, errrecv := stack.dev.EthPoll(stack.rxtxBuf)
+	if recv > 0 {
+		frame := stack.rxtxBuf[off : off+recv]
+		if pcapdebug {
+			printPacket("IN", frame)
+		}
+		// Frames the stack does not handle, like IPv6 or STP, are normal traffic.
+		if stack.s.IngressEthernet(frame) != nil {
+			atomic.AddUint32(&rxIngressErrors, 1)
+		}
 	}
 	send, err = stack.s.EgressEthernet(stack.rxtxBuf)
 	if err != nil {
@@ -126,7 +131,7 @@ func (stack *Stack) RecvAndSend() (send, recv int, err error) {
 		printPacket("OUT", stack.rxtxBuf[:send])
 	}
 
-	err = stack.dev.SendEthFrame(stack.rxtxBuf[:send])
+	err = stack.dev.SendOffsetEthFrame(stack.rxtxBuf[:send])
 	return send, recv, err
 }
 

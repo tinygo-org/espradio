@@ -31,6 +31,7 @@ type Esplink struct {
 	gostack   xnet.StackGo
 	berkeley  xnet.StackBerkeley
 	stackloop sync.Once
+	link      espradio.Link
 
 	// ArenaPoolSize overrides the default arena pool size (bytes). Zero uses target default.
 	ArenaPoolSize int
@@ -50,32 +51,12 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 		println("Esplink NetConnect: ssid:", params.Ssid)
 	}
 
-	err := espradio.Enable(espradio.Config{
+	n.link.Config = espradio.Config{
 		Logging:       espradio.LogLevelError,
 		ArenaPoolSize: n.ArenaPoolSize,
-	})
-	if err != nil {
-		if debug {
-			println("could not enable radio:", err)
-		}
-		return err
 	}
-
-	if debug {
-		println("Esplink NetConnect: starting radio")
-	}
-	err = espradio.Start()
-	if err != nil {
-		if debug {
-			println("could not start radio:", err)
-		}
-		return err
-	}
-
-	if debug {
-		println("Esplink NetConnect: connecting to WiFi")
-	}
-	err = espradio.Connect(espradio.STAConfig{
+	n.link.LinkNotify(n.onLink)
+	err := n.link.LinkConnect(espradio.STAConfig{
 		SSID:     params.Ssid,
 		Password: params.Passphrase,
 	})
@@ -85,16 +66,11 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 		}
 		return err
 	}
+	nd := n.link.NetDev()
 
-	if debug {
-		println("Esplink NetConnect: connected to WiFi, starting stack")
-	}
-	nd, err := espradio.StartNetDev()
-	if err != nil {
-		if debug {
-			println("netdev failed:", err)
-		}
-		return err
+	if n.netstack != nil {
+		// Reconnect keeps the running stack and only renews the lease.
+		return n.setupDHCP()
 	}
 
 	if len(params.Hostname) == 0 {
@@ -135,7 +111,11 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 		n.berkeley = *xnet.NewBerkeleyStack(n.gostack.Socket)
 		go handleStack(espstack)
 	})
-	_, err = n.netstack.SetupWithDHCP(espradio.DHCPConfig{})
+	return n.setupDHCP()
+}
+
+func (n *Esplink) setupDHCP() error {
+	_, err := n.netstack.SetupWithDHCP(espradio.DHCPConfig{})
 	if err != nil {
 		if debug {
 			println("DHCP failed:", err)
@@ -149,11 +129,18 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 	return nil
 }
 
+func (n *Esplink) onLink(connected bool) (int, espradio.STAConfig) {
+	if !connected && n.notifyCb != nil {
+		n.notifyCb(nl.EventNetDown)
+	}
+	return 0, espradio.STAConfig{}
+}
+
 func (n *Esplink) StackGo() xnet.StackGo { return n.gostack }
 
 // NetDisconnect device from network
 func (n *Esplink) NetDisconnect() {
-	// TODO: implement this.  For now, just do nothing and let the connection time out.
+	n.link.LinkDisconnect()
 }
 
 // NetNotify to register callback for network events

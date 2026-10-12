@@ -109,7 +109,7 @@ flowchart TD
     F["Espressif Binary Blobs"]
     G["ESP32 Radio Hardware"]
 
-    A --Go net/http, httphi or lneto API--> B --Esplink netdev interface--> C --lneto TCP/IP + DHCP/DNS/NTP--> D --EthernetDevice send/recv--> E --radio.c / lib.c / isr.c--> F --WiFi + PHY libs--> G
+    A --Go net/http, httphi or lneto API--> B --Esplink netdev interface--> C --lneto TCP/IP + DHCP/DNS/NTP--> D --NetDev send/recv--> E --radio.c / lib.c / isr.c--> F --WiFi + PHY libs--> G
 ```
 
 - **User Application** - your code, using Go `net/http`, the heapless `httphi` router, or the `lneto` API directly.

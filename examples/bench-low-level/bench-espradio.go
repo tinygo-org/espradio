@@ -75,7 +75,7 @@ func main() {
 	failIfErr("starting radio", err)
 
 	// Associate before StartNetDev.  Without this the RX ring never fills and
-	// every SendEthFrame is refused before it reaches the blob.
+	// every SendOffsetEthFrame is refused before it reaches the blob.
 	println("connecting to", ssid, "...")
 	err = espradio.Connect(espradio.STAConfig{SSID: ssid, Password: password})
 	failIfErr("connecting to AP", err)
@@ -111,7 +111,7 @@ func main() {
 		}
 		lastTop = top
 
-		n, err := netdev.EthPoll(buf[:])
+		_, n, err := netdev.EthPoll(buf[:])
 		if err != nil {
 			rxErr++
 		}
@@ -122,7 +122,7 @@ func main() {
 			if !top.Before(nextAnnounce) {
 				nextAnnounce = top.Add(announceEvery)
 				if m := announce(buf); m > 0 {
-					if err := netdev.SendEthFrame(buf[:m]); err != nil {
+					if err := netdev.SendOffsetEthFrame(buf[:m]); err != nil {
 						txErr++
 					} else {
 						announces++
@@ -143,7 +143,7 @@ func main() {
 			sample(rxDone)
 			continue
 		}
-		err = netdev.SendEthFrame(buf[:m])
+		err = netdev.SendOffsetEthFrame(buf[:m])
 		// Measured from the frame being in hand to the driver having taken it, so
 		// it is the TX path and nothing else -- no sleep, no poll, no host.
 		noteService(time.Since(rxDone))
