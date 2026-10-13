@@ -59,14 +59,14 @@ func (nd *NetDev) SendOffsetEthFrame(frame []byte) error {
 	return nil
 }
 
-// SetEthRecvHandler sets the callback that EthPoll calls for each received frame.
-// The handler only runs inside EthPoll, so it is quiescent once this returns.
+// SetEthRecvHandler sets the callback that EthPoll calls for each received frame,
+// as in [netdev.DevEthernet]. It only runs inside EthPoll, so it is quiescent once this returns.
 func (nd *NetDev) SetEthRecvHandler(handler func(rxEthframe []byte)) {
 	nd.rxHandler = handler
 }
 
-// EthPoll pops one received frame. With no handler set the frame is written to buf
-// and its length returned. With a handler set buf is unused and the handler gets the frame.
+// EthPoll pops one received frame following [netdev.DevEthernet]. With no handler the
+// frame goes into buf. With a handler buf may be nil and is unused, and the handler gets the frame.
 func (nd *NetDev) EthPoll(buf []byte) (ethFrameOff, ethernetBytes int, err error) {
 	if C.espradio_netif_rx_available() == 0 {
 		return 0, 0, nil
