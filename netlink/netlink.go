@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/soypat/lneto"
+	"github.com/soypat/lneto/dns"
 	"github.com/soypat/lneto/x/xnet"
 
 	nl "tinygo.org/x/drivers/netlink"
@@ -172,8 +173,12 @@ func (n *Esplink) GetHostByName(name string) (netip.Addr, error) {
 	if addr, literal, err := parseIPLiteral(name); literal {
 		return addr, err
 	}
-	rstack := n.rstack()
-	addrs, err := rstack.DoLookupIP(name, 5*time.Second, 3)
+	var host dns.Name
+	if err := host.Parse(name); err != nil {
+		return netip.Addr{}, err
+	}
+	var addrs [1]netip.Addr
+	_, err := n.rstack().DoLookupIP(addrs[:], host, 5*time.Second, 3)
 	if err != nil {
 		if debug {
 			println("DNS lookup failed:", err)

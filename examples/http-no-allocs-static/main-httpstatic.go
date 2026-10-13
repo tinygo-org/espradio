@@ -98,7 +98,8 @@ func main() {
 	if err != nil {
 		failure("DHCP failed: " + err.Error())
 	}
-	tcpPool, err := xnet.NewTCPPool(xnet.TCPPoolConfig{
+	lstack := espstack.LnetoStack()
+	tcpPool, err := lstack.NewTCPPool(xnet.TCPPoolConfig{
 		PoolSize:           maxConns,
 		QueueSize:          3,
 		TxBufSize:          len(webPage) + 128,
@@ -111,7 +112,6 @@ func main() {
 		failure("tcppool create: " + err.Error())
 	}
 
-	lstack := espstack.LnetoStack()
 	addr, ok := netip.AddrFromSlice(dhcp.AssignedAddr4[:])
 	if !ok {
 		failure("invalid IP address")
@@ -152,14 +152,14 @@ func main() {
 			continue
 		}
 
-		conn, _, err := listener.TryAccept()
+		conn, err := listener.TryAccept()
 		if err != nil {
 			println("listener accept err", err.Error())
 			time.Sleep(time.Second)
 			continue
 		}
-		remoteAddr, _ := netip.AddrFromSlice(conn.RemoteAddr())
-		println("incoming connection:", remoteAddr.String(), "from port", conn.RemotePort())
+		remote := conn.RemoteAddrPort()
+		println("incoming connection:", remote.Addr().String(), "from port", remote.Port())
 		conn.SetDeadline(time.Now().Add(connDeadline))
 		err = router.Handle(conn)
 		if err != nil {

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/soypat/lneto"
+	"github.com/soypat/lneto/dns"
 	"tinygo.org/x/espradio"
 )
 
@@ -123,7 +124,8 @@ func ntpSync(stack *espradio.Stack) {
 	println("resolving ntp host:", ntpHost)
 	rstack := stack.LnetoStack().StackRetrying(pollBackoff)
 
-	addrs, err := rstack.DoLookupIP(ntpHost, 5*time.Second, 3)
+	var addrs [1]netip.Addr
+	_, err := rstack.DoLookupIP(addrs[:], dns.MustNewName(ntpHost), 5*time.Second, 3)
 	if err != nil {
 		println("DNS lookup failed:", err.Error())
 		return

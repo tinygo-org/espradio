@@ -26,6 +26,7 @@ import (
 	"unsafe"
 
 	"github.com/soypat/lneto"
+	"github.com/soypat/lneto/dns"
 	"github.com/soypat/lneto/http/httphi"
 	"github.com/soypat/lneto/tcp"
 	"github.com/soypat/lneto/x/xnet"
@@ -124,7 +125,8 @@ func main() {
 
 	// DNS lookup for NTP server and calculate time. If this fails just ignore.
 	println("resolving ntp host:", ntpHost)
-	addrs, err := rstack.DoLookupIP(ntpHost, 5*time.Second, 3)
+	var addrs [1]netip.Addr
+	_, err = rstack.DoLookupIP(addrs[:], dns.MustNewName(ntpHost), 5*time.Second, 3)
 	if err == nil {
 		offset, err := rstack.DoNTP(addrs[0], 5*time.Second, 3)
 		if err == nil {
@@ -133,7 +135,7 @@ func main() {
 		}
 	}
 
-	tcpPool, err := xnet.NewTCPPool(xnet.TCPPoolConfig{
+	tcpPool, err := lstack.NewTCPPool(xnet.TCPPoolConfig{
 		PoolSize:           maxConns,
 		QueueSize:          3,
 		TxBufSize:          len(htmlTemplate) + 1024,
@@ -179,7 +181,7 @@ func main() {
 			continue
 		}
 
-		conn, _, err := listener.TryAccept()
+		conn, err := listener.TryAccept()
 		if err != nil {
 			println("err listener accept:", err.Error())
 			time.Sleep(time.Second)
@@ -343,11 +345,11 @@ func sanitizeCallsign(raw []byte) []byte {
 // addrBuf formats remote addresses in printIncoming. Only the accept loop uses it.
 var addrBuf [64]byte
 
-func printIncoming(conn *tcp.Conn) {
-	remoteAddr, _ := netip.AddrFromSlice(conn.RemoteAddr())
+func printIncoming(conn tcp.ConnHandle) {
+	remote := conn.RemoteAddrPort()
 	print("incoming connection: ")
-	printAddr(remoteAddr, addrBuf[:0])
-	println(" from port", conn.RemotePort())
+	printAddr(remote.Addr(), addrBuf[:0])
+	println(" from port", remote.Port())
 }
 
 // printAddr prints a netip.Addr without heap allocation by formatting into buf.

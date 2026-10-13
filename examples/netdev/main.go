@@ -55,7 +55,6 @@ func main() {
 		TxBufSize:          2048,
 		RxBufSize:          512,
 		NewBackoff:         func() lneto.BackoffStrategy { return backoff },
-		NanoTime:           func() int64 { return time.Now().UnixNano() },
 		EstablishedTimeout: 5 * time.Second,
 		ClosingTimeout:     3 * time.Second,
 	})
