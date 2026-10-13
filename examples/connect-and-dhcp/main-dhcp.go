@@ -57,15 +57,19 @@ func main() {
 
 	println("creating lneto stack...")
 	var stack xnet.Netstack
-	err = stack.Reset(xnet.StackConfig{
-		Hostname:          ssid,
-		RandSeed:          time.Now().UnixNano() | 1,
-		HardwareAddress:   hw,
-		MTU:               1500,
-		MaxActiveUDPPorts: 2,
-		MaxActiveTCPPorts: 1,
-	}, backoff, xnet.TCPPoolConfig{
-		NewBackoff: func() lneto.BackoffStrategy { return backoff },
+	err = stack.Reset(xnet.NetstackConfig{
+		StackConfig: xnet.StackConfig{
+			Hostname:          ssid,
+			RandSeed:          time.Now().UnixNano() | 1,
+			HardwareAddress:   hw,
+			MTU:               1500,
+			MaxActiveUDPPorts: 2,
+			MaxActiveTCPPorts: 1,
+		},
+		BackoffStack: backoff,
+		TCPPoolConfig: xnet.TCPPoolConfig{
+			NewBackoff: func() lneto.BackoffStrategy { return backoff },
+		},
 	})
 	if err != nil {
 		failure("stack failed: " + err.Error())

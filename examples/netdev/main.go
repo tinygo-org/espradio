@@ -40,23 +40,27 @@ func main() {
 	failIfErr("hardware addr", err)
 
 	var stack xnet.Netstack
-	err = stack.Reset(xnet.StackConfig{
-		RandSeed:          time.Now().UnixNano() | 1,
-		Hostname:          "espradio-netdev",
-		MaxActiveTCPPorts: 4,
-		MaxActiveUDPPorts: 4,
-		ICMPQueueLimit:    1,
-		MTU:               1500,
-		PassivePeers:      4,
-		HardwareAddress:   hw,
-	}, backoff, xnet.TCPPoolConfig{
-		PoolSize:           4,
-		QueueSize:          4,
-		TxBufSize:          2048,
-		RxBufSize:          512,
-		NewBackoff:         func() lneto.BackoffStrategy { return backoff },
-		EstablishedTimeout: 5 * time.Second,
-		ClosingTimeout:     3 * time.Second,
+	err = stack.Reset(xnet.NetstackConfig{
+		StackConfig: xnet.StackConfig{
+			RandSeed:          time.Now().UnixNano() | 1,
+			Hostname:          "espradio-netdev",
+			MaxActiveTCPPorts: 4,
+			MaxActiveUDPPorts: 4,
+			ICMPQueueLimit:    1,
+			MTU:               1500,
+			PassivePeers:      4,
+			HardwareAddress:   hw,
+		},
+		BackoffStack: backoff,
+		TCPPoolConfig: xnet.TCPPoolConfig{
+			PoolSize:           4,
+			QueueSize:          4,
+			TxBufSize:          2048,
+			RxBufSize:          512,
+			NewBackoff:         func() lneto.BackoffStrategy { return backoff },
+			EstablishedTimeout: 5 * time.Second,
+			ClosingTimeout:     3 * time.Second,
+		},
 	})
 	failIfErr("stack reset", err)
 	failIfErr("icmp enable", stack.EnableICMP(true))

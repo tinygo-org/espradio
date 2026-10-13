@@ -110,7 +110,12 @@ func (n *Esplink) startStack(nd *espradio.NetDev, cfg xnet.StackConfig, pool xne
 	cfg.HardwareAddress = hw
 	cfg.MTU = 1500
 	cfg.RandSeed = time.Now().UnixNano() | 1
-	if err := n.ns.Reset(cfg, pollBackoff, pool); err != nil {
+	err = n.ns.Reset(xnet.NetstackConfig{
+		StackConfig:   cfg,
+		BackoffStack:  pollBackoff,
+		TCPPoolConfig: pool,
+	})
+	if err != nil {
 		return err
 	}
 	n.berkeley = *xnet.NewBerkeleyStack(n.ns.StackGo().Socket)
@@ -168,7 +173,7 @@ func (n *Esplink) GetHardwareAddr() (net.HardwareAddr, error) {
 	if debug {
 		println("GetHardwareAddr")
 	}
-	hw := n.ns.StackAsync().HardwareAddr()
+	hw := n.ns.HardwareAddr()
 	return hw[:], nil
 }
 
