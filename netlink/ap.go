@@ -155,11 +155,8 @@ func (n *Esplink) NetConnectAP(params APConnectParams) error {
 	return nil
 }
 
-// startDHCPServer serves DHCPv4 leases from subnet, which must hold serverAddr.
+// startDHCPServer serves DHCPv4 leases from subnet.
 func (n *Esplink) startDHCPServer(serverAddr netip.Addr, subnet netip.Prefix) error {
-	if !subnet.IsValid() || !subnet.Addr().Is4() || !subnet.Contains(serverAddr) {
-		return errDHCPInvalidSubnet
-	}
 	err := n.dhcpSrv.Configure(dhcpv4.ServerConfig{
 		ServerAddr: serverAddr.As4(),
 		Gateway:    serverAddr.As4(),
