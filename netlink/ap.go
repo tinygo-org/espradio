@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/soypat/lneto"
+	"github.com/soypat/lneto/dhcp/dhcpv4"
+	"github.com/soypat/lneto/ipv4"
 	"github.com/soypat/lneto/x/xnet"
 
 	nl "tinygo.org/x/drivers/netlink"
@@ -103,13 +105,21 @@ func (n *Esplink) NetConnectAP(params APConnectParams) error {
 	if params.EnableDHCPServer && udpPorts < 1 {
 		udpPorts = 1 // reserve one slot for the DHCP server
 	}
-	espstack, err := espradio.NewStack(nd, espradio.StackConfig{
-		Hostname:         params.Hostname,
-		StaticAddress:    params.StaticAddr,
-		MaxUDPPorts:      udpPorts,
-		MaxTCPPorts:      params.MaxTCPPorts,
-		PassivePeers:     params.PassivePeers,
-		AcceptBroadcast4: true,
+	err = n.startStack(nd, xnet.StackConfig{
+		Hostname:            params.Hostname,
+		StaticAddress4:      params.StaticAddr.As4(),
+		MaxActiveUDPPorts:   uint16(udpPorts),
+		MaxActiveTCPPorts:   uint16(params.MaxTCPPorts),
+		PassivePeers:        params.PassivePeers,
+		AcceptIPv4Broadcast: true,
+	}, xnet.TCPPoolConfig{
+		PoolSize:           2,
+		QueueSize:          4,
+		TxBufSize:          4096,
+		RxBufSize:          1024,
+		EstablishedTimeout: 10 * time.Second,
+		ClosingTimeout:     5 * time.Second,
+		NewBackoff:         func() lneto.BackoffStrategy { return pollBackoff },
 	})
 	if err != nil {
 		if debug {
@@ -117,23 +127,23 @@ func (n *Esplink) NetConnectAP(params APConnectParams) error {
 		}
 		return err
 	}
+	stack := n.ns.StackAsync()
+	stack.SetSubnet4(params.StaticAddr.As4(), 24)
 
 	// In AP mode there is no upstream gateway. Set gwmac to a non-broadcast
 	// dummy value so patchEgressMAC does not bail out early on its
 	// IsBroadcast() check and actually patches the destination MAC from the
 	// passively-learned client ARP table.
-	espstack.LnetoStack().SetGatewayHardwareAddr([6]byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x01})
+	stack.SetGatewayHardwareAddr([6]byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x01})
 
 	if params.EnableDHCPServer {
-		if err := espstack.SetupWithDHCPServer(params.DHCPSubnet); err != nil {
+		if err := n.startDHCPServer(params.StaticAddr, params.DHCPSubnet); err != nil {
 			if debug {
 				println("Esplink NetConnectAP: DHCP server failed:", err)
 			}
 			return err
 		}
 	}
-
-	n.netstack = espstack
 
 	if n.notifyCb != nil {
 		n.notifyCb(nl.EventNetUp)
@@ -142,20 +152,22 @@ func (n *Esplink) NetConnectAP(params APConnectParams) error {
 	if debug {
 		println("Esplink NetConnectAP: stack started, addr:", params.StaticAddr.String())
 	}
-	n.stackloop.Do(func() {
-		n.gostack = n.netstack.LnetoStack().StackGo(pollBackoff, xnet.StackGoConfig{
-			ListenerPoolConfig: xnet.TCPPoolConfig{
-				PoolSize:           2,
-				QueueSize:          4,
-				TxBufSize:          4096,
-				RxBufSize:          1024,
-				EstablishedTimeout: 10 * time.Second,
-				ClosingTimeout:     5 * time.Second,
-				NewBackoff:         func() lneto.BackoffStrategy { return pollBackoff },
-			},
-		})
-		n.berkeley = *xnet.NewBerkeleyStack(n.gostack.Socket)
-		go handleStack(espstack)
-	})
 	return nil
+}
+
+// startDHCPServer serves DHCPv4 leases from subnet, which must hold serverAddr.
+func (n *Esplink) startDHCPServer(serverAddr netip.Addr, subnet netip.Prefix) error {
+	if !subnet.IsValid() || !subnet.Addr().Is4() || !subnet.Contains(serverAddr) {
+		return errDHCPInvalidSubnet
+	}
+	err := n.dhcpSrv.Configure(dhcpv4.ServerConfig{
+		ServerAddr: serverAddr.As4(),
+		Gateway:    serverAddr.As4(),
+		Subnet:     ipv4.PrefixFromNetip(subnet),
+	})
+	if err != nil {
+		return err
+	}
+	// A zero remote address accepts clients that have no IP yet.
+	return n.ns.StackAsync().RegisterUDP4(&n.dhcpSrv, [4]byte{}, dhcpv4.DefaultClientPort)
 }

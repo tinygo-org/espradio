@@ -778,9 +778,6 @@ type Stats struct {
 	RxCallbacks uint32 // frames handed over by the blob
 	RxDrops     uint32 // frames dropped because the RX ring was full
 	RxOversize  uint32 // frames dropped because they exceeded the read buffer
-	// RxIngressErrors counts frames the upper stack declined.  Expected to be
-	// non-zero in normal operation: unhandled protocols land here.
-	RxIngressErrors uint32
 
 	// TX path.
 	TxAttempts     uint32 // frames handed to esp_wifi_internal_tx
@@ -828,7 +825,7 @@ func (s Stats) Print() {
 		"isrsendfail", s.ISRRingSendFail,
 		"queuefull", s.QueueSendFull)
 	println("espradio rx: cb", s.RxCallbacks, "drop", s.RxDrops,
-		"oversize", s.RxOversize, "ingresserr", s.RxIngressErrors)
+		"oversize", s.RxOversize)
 	println("espradio tx: try", s.TxAttempts,
 		"nomem", s.TxFailNoMem,
 		"other", s.TxFailOther,
@@ -882,7 +879,6 @@ func ReadStats(s *Stats) {
 	s.RxCallbacks = uint32(C.espradio_netif_rx_cb_count())
 	s.RxDrops = uint32(C.espradio_netif_rx_cb_drop())
 	s.RxOversize = uint32(C.espradio_netif_rx_oversize())
-	s.RxIngressErrors = atomic.LoadUint32(&rxIngressErrors)
 
 	var attempts, failNoMem, failOther, notConnected, txDone, retries, busyWaits C.uint32_t
 	C.espradio_netif_tx_stats(&attempts, &failNoMem, &failOther, &notConnected,

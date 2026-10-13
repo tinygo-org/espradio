@@ -1,13 +1,14 @@
 package netlink
 
 import (
+	"context"
 	"net"
 	"net/netip"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/soypat/lneto"
+	"github.com/soypat/lneto/dhcp/dhcpv4"
 	"github.com/soypat/lneto/dns"
 	"github.com/soypat/lneto/x/xnet"
 
@@ -19,27 +20,29 @@ const defaultHostname = "tinygo-espradio"
 
 const pollTime = 5 * time.Millisecond
 
+const dhcpTimeout = 10 * time.Second
+
 var pollBackoff = lneto.BackoffStrategy(func(_ uint) time.Duration {
 	return pollTime
 })
 
-// Esplink implements the Netlinker interface for the ESP32-C3's WiFi interface, using the espradio package and an lneto Stack.
+// Esplink implements the Netlinker interface for the ESP32 WiFi interface, using the espradio package and an lneto Netstack.
 type Esplink struct {
 	params   *nl.ConnectParams
 	notifyCb func(nl.Event)
 
-	netstack  *espradio.Stack
-	gostack   xnet.StackGo
-	berkeley  xnet.StackBerkeley
-	stackloop sync.Once
-	link      espradio.Link
+	ns       xnet.Netstack
+	dhcpSrv  dhcpv4.Server
+	berkeley xnet.StackBerkeley
+	started  bool
+	link     espradio.Link
 
 	// ArenaPoolSize overrides the default arena pool size (bytes). Zero uses target default.
 	ArenaPoolSize int
 }
 
 func (n *Esplink) rstack() xnet.StackRetrying {
-	return n.netstack.LnetoStack().StackRetrying(pollBackoff)
+	return n.ns.StackAsync().StackRetrying(pollBackoff)
 }
 
 // NetConnect device to network
@@ -67,9 +70,7 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 		}
 		return err
 	}
-	nd := n.link.NetDev()
-
-	if n.netstack != nil {
+	if n.started {
 		// Reconnect keeps the running stack and only renews the lease.
 		return n.setupDHCP()
 	}
@@ -77,11 +78,19 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 	if len(params.Hostname) == 0 {
 		params.Hostname = defaultHostname
 	}
-	espstack, err := espradio.NewStack(nd, espradio.StackConfig{
-		Hostname:     params.Hostname,
-		MaxUDPPorts:  2,
-		MaxTCPPorts:  1,
-		PassivePeers: 64,
+	err = n.startStack(n.link.NetDev(), xnet.StackConfig{
+		Hostname:          params.Hostname,
+		MaxActiveUDPPorts: 2,
+		MaxActiveTCPPorts: 1,
+		PassivePeers:      64,
+	}, xnet.TCPPoolConfig{
+		PoolSize:           4,
+		QueueSize:          4,
+		TxBufSize:          4096,
+		RxBufSize:          1024,
+		EstablishedTimeout: 2 * time.Second,
+		ClosingTimeout:     2 * time.Second,
+		NewBackoff:         func() lneto.BackoffStrategy { return pollBackoff },
 	})
 	if err != nil {
 		if debug {
@@ -89,34 +98,39 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 		}
 		return err
 	}
-
-	n.netstack = espstack
-
-	if debug {
-		println("Esplink NetConnect: stack started")
-	}
-	n.stackloop.Do(func() {
-		// Start stack goroutine once.
-		n.gostack = n.netstack.LnetoStack().StackGo(pollBackoff, xnet.StackGoConfig{
-			ListenerPoolConfig: xnet.TCPPoolConfig{
-				PoolSize:           4,
-				QueueSize:          4,
-				TxBufSize:          4096,
-				RxBufSize:          1024,
-				EstablishedTimeout: 2 * time.Second,
-				ClosingTimeout:     2 * time.Second,
-				NewBackoff:         func() lneto.BackoffStrategy { return pollBackoff },
-			},
-		})
-
-		n.berkeley = *xnet.NewBerkeleyStack(n.gostack.Socket)
-		go handleStack(espstack)
-	})
 	return n.setupDHCP()
 }
 
+// startStack configures the lneto stack on nd and starts running it.
+func (n *Esplink) startStack(nd *espradio.NetDev, cfg xnet.StackConfig, pool xnet.TCPPoolConfig) error {
+	hw, err := nd.HardwareAddr6()
+	if err != nil {
+		return err
+	}
+	cfg.HardwareAddress = hw
+	cfg.MTU = 1500
+	cfg.RandSeed = time.Now().UnixNano() | 1
+	if err := n.ns.Reset(cfg, pollBackoff, pool); err != nil {
+		return err
+	}
+	n.berkeley = *xnet.NewBerkeleyStack(n.ns.StackGo().Socket)
+	n.started = true
+	go func() {
+		err := espradio.RunStack(context.Background(), nd, &n.ns)
+		if debug {
+			println("RunStack exited:", err.Error())
+		}
+	}()
+	if debug {
+		println("Esplink: stack started")
+	}
+	return nil
+}
+
 func (n *Esplink) setupDHCP() error {
-	_, err := n.netstack.SetupWithDHCP(espradio.DHCPConfig{})
+	ctx, cancel := context.WithTimeout(context.Background(), dhcpTimeout)
+	defer cancel()
+	_, _, _, err := n.ns.EnableDHCP(ctx, true, netip.Addr{})
 	if err != nil {
 		if debug {
 			println("DHCP failed:", err)
@@ -137,7 +151,7 @@ func (n *Esplink) onLink(connected bool) (int, espradio.STAConfig) {
 	return 0, espradio.STAConfig{}
 }
 
-func (n *Esplink) StackGo() xnet.StackGo { return n.gostack }
+func (n *Esplink) StackGo() xnet.StackGo { return *n.ns.StackGo() }
 
 // NetDisconnect device from network
 func (n *Esplink) NetDisconnect() {
@@ -154,7 +168,7 @@ func (n *Esplink) GetHardwareAddr() (net.HardwareAddr, error) {
 	if debug {
 		println("GetHardwareAddr")
 	}
-	hw := n.netstack.LnetoStack().HardwareAddr()
+	hw := n.ns.StackAsync().HardwareAddr()
 	return hw[:], nil
 }
 
@@ -177,11 +191,15 @@ func (n *Esplink) GetHostByName(name string) (netip.Addr, error) {
 	if err := host.Parse(name); err != nil {
 		return netip.Addr{}, err
 	}
-	var addrs [1]netip.Addr
-	_, err := n.rstack().DoLookupIP(addrs[:], host, 5*time.Second, 3)
-	if err != nil {
+	// Lookups fail when the reply has more addresses than fit, so leave room.
+	var addrs [8]netip.Addr
+	naddr, err := n.rstack().DoLookupIP(addrs[:], host, 5*time.Second, 3)
+	if naddr == 0 {
+		if err == nil {
+			err = errNoAddress
+		}
 		if debug {
-			println("DNS lookup failed:", err)
+			println("DNS lookup failed:", err.Error())
 		}
 		return netip.Addr{}, err
 	}
@@ -207,7 +225,7 @@ func (n *Esplink) Addr() (netip.Addr, error) {
 	if debug {
 		println("Addr")
 	}
-	addr4 := n.netstack.LnetoStack().Addr4()
+	addr4 := n.ns.IPAddr4()
 	addr, ok := netip.AddrFromSlice(addr4[:])
 	if !ok {
 		return netip.Addr{}, errInvalidIPAddress
@@ -307,22 +325,4 @@ func (n *Esplink) SetSockOpt(sockfd int, level int, opt int, value interface{}) 
 	}
 
 	return n.berkeley.SetSockOpt(sockfd, level, opt, value)
-}
-
-func handleStack(stack *espradio.Stack) {
-	for {
-		send, recv, err := stack.RecvAndSend()
-		if err != nil && debug {
-			// A TX failure here is already unrecoverable: EgressEthernet dequeued
-			// the frame before the send was attempted, so there is nothing left to
-			// retry with.  The retry that can still help runs inside
-			// espradio_netif_tx, against the blob's TX-done signal.  With debug
-			// off, ReadStats is the record: TxFailNoMem, TxFailOther,
-			// TxNotConnected.
-			println("handleStack: RecvAndSend:", err.Error())
-		}
-		if send == 0 && recv == 0 {
-			time.Sleep(pollTime)
-		}
-	}
 }

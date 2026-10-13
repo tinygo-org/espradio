@@ -17,6 +17,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"net/netip"
 	"runtime"
@@ -89,45 +90,49 @@ func main() {
 		failure("netdev failed: " + err.Error())
 	}
 
+	hw, err := nd.HardwareAddr6()
+	if err != nil {
+		failure("mac failed: " + err.Error())
+	}
+
 	println("creating lneto stack...")
-	espstack, err := espradio.NewStack(nd, espradio.StackConfig{
-		Hostname:     ssid,
-		MaxUDPPorts:  2,
-		MaxTCPPorts:  2,
-		PassivePeers: 64,
+	var stack xnet.Netstack
+	err = stack.Reset(xnet.StackConfig{
+		Hostname:          ssid,
+		RandSeed:          time.Now().UnixNano() | 1,
+		HardwareAddress:   hw,
+		MTU:               1500,
+		MaxActiveUDPPorts: 2,
+		MaxActiveTCPPorts: 2,
+		PassivePeers:      64,
+	}, pollBackoff, xnet.TCPPoolConfig{
+		NewBackoff: func() lneto.BackoffStrategy { return pollBackoff },
 	})
 	if err != nil {
 		failure("stack failed: " + err.Error())
 	}
 
-	// Start the poll loop in the background.
-	go loopForeverStack(espstack)
+	// Start the stack in the background before using it.
+	go func() {
+		failure("stack stopped: " + espradio.RunStack(context.Background(), nd, &stack).Error())
+	}()
 	println("starting DHCP...")
-	dhcp, err := espstack.SetupWithDHCP(espradio.DHCPConfig{})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	addr, _, _, err := stack.EnableDHCP(ctx, true, netip.Addr{})
+	cancel()
 	if err != nil {
 		failure("DHCP failed: " + err.Error())
 	}
-
-	addr, ok := netip.AddrFromSlice(dhcp.AssignedAddr4[:])
-	if !ok {
-		failure("invalid IP address")
-	}
-
 	println("got IP:", addr.String())
 
-	lstack := espstack.LnetoStack()
+	lstack := stack.StackAsync()
 	rstack := lstack.StackRetrying(pollBackoff)
-	gatewayHW, err := rstack.DoResolveHardwareAddress6(dhcp.Router, 500*time.Millisecond, 4)
-	if err != nil {
-		failure("ARP resolve failed: " + err.Error())
-	}
-	lstack.SetGatewayHardwareAddr(gatewayHW)
 
 	// DNS lookup for NTP server and calculate time. If this fails just ignore.
 	println("resolving ntp host:", ntpHost)
-	var addrs [1]netip.Addr
-	_, err = rstack.DoLookupIP(addrs[:], dns.MustNewName(ntpHost), 5*time.Second, 3)
-	if err == nil {
+	// Lookups fail when the reply has more addresses than fit, so leave room.
+	var addrs [8]netip.Addr
+	if n, _ := rstack.DoLookupIP(addrs[:], dns.MustNewName(ntpHost), 5*time.Second, 3); n > 0 {
 		offset, err := rstack.DoNTP(addrs[0], 5*time.Second, 3)
 		if err == nil {
 			runtime.AdjustTimeOffset(int64(offset))
@@ -356,15 +361,6 @@ func printIncoming(conn tcp.ConnHandle) {
 func printAddr(addr netip.Addr, buf []byte) {
 	buf = addr.AppendTo(buf[:0])
 	print(unsafe.String(&buf[0], len(buf)))
-}
-
-func loopForeverStack(stack *espradio.Stack) {
-	for {
-		send, recv, _ := stack.RecvAndSend()
-		if send == 0 && recv == 0 {
-			time.Sleep(pollTime)
-		}
-	}
 }
 
 func failure(msg string) {

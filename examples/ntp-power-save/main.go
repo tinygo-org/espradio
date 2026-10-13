@@ -5,12 +5,14 @@
 package main
 
 import (
+	"context"
 	"net/netip"
 	"runtime"
 	"time"
 
 	"github.com/soypat/lneto"
 	"github.com/soypat/lneto/dns"
+	"github.com/soypat/lneto/x/xnet"
 	"tinygo.org/x/espradio"
 )
 
@@ -52,17 +54,30 @@ func main() {
 		failure("netdev failed: " + err.Error())
 	}
 
+	hw, err := nd.HardwareAddr6()
+	if err != nil {
+		failure("mac failed: " + err.Error())
+	}
+
 	println("creating lneto stack...")
-	stack, err := espradio.NewStack(nd, espradio.StackConfig{
-		Hostname:    ssid,
-		MaxUDPPorts: 2, // DNS + NTP
-		MaxTCPPorts: 1,
+	stack := new(xnet.Netstack)
+	err = stack.Reset(xnet.StackConfig{
+		Hostname:          ssid,
+		RandSeed:          time.Now().UnixNano() | 1,
+		HardwareAddress:   hw,
+		MTU:               1500,
+		MaxActiveUDPPorts: 2, // DNS + NTP
+		MaxActiveTCPPorts: 1,
+	}, pollBackoff, xnet.TCPPoolConfig{
+		NewBackoff: func() lneto.BackoffStrategy { return pollBackoff },
 	})
 	if err != nil {
 		failure("stack failed: " + err.Error())
 	}
 
-	go stackLoop(stack)
+	go func() {
+		failure("stack stopped: " + espradio.RunStack(context.Background(), nd, stack).Error())
+	}()
 
 	for cycle := 1; ; cycle++ {
 		println("--- sync cycle", cycle, "---")
@@ -78,7 +93,7 @@ func main() {
 }
 
 // syncTime updates the clock and then stops Wi-Fi.
-func syncTime(stack *espradio.Stack) {
+func syncTime(stack *xnet.Netstack) {
 	println("connecting to", ssid, "...")
 	err := espradio.Connect(espradio.STAConfig{
 		SSID:     ssid,
@@ -92,15 +107,11 @@ func syncTime(stack *espradio.Stack) {
 	println("connected to", ssid, "!")
 
 	println("starting DHCP...")
-	dhcp, err := stack.SetupWithDHCP(espradio.DHCPConfig{})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	addr, _, _, err := stack.EnableDHCP(ctx, true, netip.Addr{})
+	cancel()
 	if err != nil {
 		println("DHCP failed:", err.Error())
-		stopRadio()
-		return
-	}
-	addr, ok := netip.AddrFromSlice(dhcp.AssignedAddr4[:])
-	if !ok {
-		println("invalid IP address")
 		stopRadio()
 		return
 	}
@@ -120,14 +131,15 @@ func stopRadio() {
 }
 
 // ntpSync gets the time from the NTP server and updates the runtime clock.
-func ntpSync(stack *espradio.Stack) {
+func ntpSync(stack *xnet.Netstack) {
 	println("resolving ntp host:", ntpHost)
-	rstack := stack.LnetoStack().StackRetrying(pollBackoff)
+	rstack := stack.StackAsync().StackRetrying(pollBackoff)
 
-	var addrs [1]netip.Addr
-	_, err := rstack.DoLookupIP(addrs[:], dns.MustNewName(ntpHost), 5*time.Second, 3)
-	if err != nil {
-		println("DNS lookup failed:", err.Error())
+	// Lookups fail when the reply has more addresses than fit, so leave room.
+	var addrs [8]netip.Addr
+	n, err := rstack.DoLookupIP(addrs[:], dns.MustNewName(ntpHost), 5*time.Second, 3)
+	if n == 0 {
+		println("DNS lookup failed:", err)
 		return
 	}
 
@@ -139,20 +151,6 @@ func ntpSync(stack *espradio.Stack) {
 
 	runtime.AdjustTimeOffset(int64(offset))
 	println("NTP success:", time.Now().String())
-}
-
-func stackLoop(stack *espradio.Stack) {
-	for {
-		send, recv, err := stack.RecvAndSend()
-		if err != nil {
-			println("poll err:", err.Error())
-			time.Sleep(pollTime)
-			continue
-		}
-		if send == 0 && recv == 0 {
-			time.Sleep(pollTime)
-		}
-	}
 }
 
 func failure(msg string) {

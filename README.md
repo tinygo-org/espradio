@@ -103,7 +103,7 @@ The [`examples`](./examples) directory contains examples and a README that descr
 flowchart TD
     A["User Application"]
     B["espradio/netlink"]
-    C["espradio Stack"]
+    C["lneto Netstack"]
     D["espradio NetDev"]
     E["CGo Bridge"]
     F["Espressif Binary Blobs"]
@@ -114,7 +114,7 @@ flowchart TD
 
 - **User Application** - your code, using Go `net/http`, the heapless `httphi` router, or the `lneto` API directly.
 - **espradio/netlink** - implements the TinyGo `netdev`/`netlink` interface so the Go stdlib `net` package works.
-- **espradio Stack** - wraps the [`lneto`](https://github.com/soypat/lneto) pure-Go TCP/IP stack with DHCP, DNS, and NTP support.
+- **lneto Netstack** - the [`lneto`](https://github.com/soypat/lneto) pure-Go TCP/IP stack with DHCP, DNS, and NTP support. `espradio.RunStack` runs it over the NetDev with a lneto `netdev.Runner`.
 - **espradio NetDev** - L2 Ethernet device that sends/receives raw frames to and from the radio.
 - **CGo Bridge** - C shim code that translates between Go and the Espressif binary libraries.
 - **Espressif Binary Blobs** - pre-compiled WiFi and PHY libraries provided by Espressif.
@@ -127,10 +127,18 @@ This package uses files from the [`esp-wifi`](https://github.com/esp-rs/esp-wifi
 
 To update them to the latest version, run `make update`. This sets up and updates the submodule, copies the needed files, and patches the ESP32 and ESP32-S3 blobs for the LLD linker. The update may break existing functionality and need changes to TinyGo linker files or other code.
 
+## Code size
+
+The lneto `noslog` build tag removes lneto logging. Without it, the slog default handler links in `encoding/json`, about 300 kB of flash, even when no logger is set.
+
+```sh
+tinygo flash -target=xiao-esp32c3 -tags=noslog ./examples/mqtt
+```
+
 ## Debugging
 
 - `netlinkdebug`: enables printing of netlink actions (webserver example)
-- `pcapdebug`: enables logging of all packets sent and received by the `espradio.Stack` (examples that use the TCP/IP stack)
+- `pcapdebug`: enables logging of all packets sent and received by `espradio.NetDev`
 ```sh
 tinygo flash -target=xiao-esp32c3 -tags=netlinkdebug,pcapdebug ./examples/webserver
 ```

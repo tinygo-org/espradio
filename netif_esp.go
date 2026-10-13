@@ -49,6 +49,9 @@ func (nd *NetDev) SendOffsetEthFrame(frame []byte) error {
 	if len(frame) == 0 {
 		return nil
 	}
+	if pcapdebug {
+		printPacket("OUT", frame)
+	}
 	code := C.espradio_netif_tx(unsafe.Pointer(&frame[0]), C.uint16_t(len(frame)))
 	if code != 0 {
 		return makeError(C.esp_err_t(code))
@@ -78,15 +81,15 @@ func (nd *NetDev) EthPoll(buf []byte) (ethFrameOff, ethernetBytes int, err error
 	if n == 0 {
 		return 0, 0, nil
 	}
+	if pcapdebug {
+		printPacket("IN", buf[:n])
+	}
 	if nd.rxHandler != nil {
 		nd.rxHandler(buf[:n])
 		return 0, 0, nil
 	}
 	return 0, n, nil
 }
-
-// rxIngressErrors counts frames the upper stack declined to handle.
-var rxIngressErrors uint32
 
 // HardwareAddr6 returns the 6-byte MAC address of the WiFi interface.
 func (nd *NetDev) HardwareAddr6() (mac [6]byte, _ error) {

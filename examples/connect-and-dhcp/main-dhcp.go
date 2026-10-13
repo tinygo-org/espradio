@@ -3,9 +3,12 @@
 package main
 
 import (
+	"context"
 	"net/netip"
 	"time"
 
+	"github.com/soypat/lneto"
+	"github.com/soypat/lneto/x/xnet"
 	"tinygo.org/x/espradio"
 )
 
@@ -47,36 +50,42 @@ func main() {
 		failure("netdev failed: " + err.Error())
 	}
 
+	hw, err := nd.HardwareAddr6()
+	if err != nil {
+		failure("mac failed: " + err.Error())
+	}
+
 	println("creating lneto stack...")
-	stack, err := espradio.NewStack(nd, espradio.StackConfig{
-		Hostname:    ssid,
-		MaxUDPPorts: 2,
-		MaxTCPPorts: 1,
+	var stack xnet.Netstack
+	err = stack.Reset(xnet.StackConfig{
+		Hostname:          ssid,
+		RandSeed:          time.Now().UnixNano() | 1,
+		HardwareAddress:   hw,
+		MTU:               1500,
+		MaxActiveUDPPorts: 2,
+		MaxActiveTCPPorts: 1,
+	}, backoff, xnet.TCPPoolConfig{
+		NewBackoff: func() lneto.BackoffStrategy { return backoff },
 	})
 	if err != nil {
 		failure("stack failed: " + err.Error())
 	}
 
-	// Start the poll loop in the background.
-	// VERY IMPORTANT TO START BEFORE USING STACK!
-	go stackLoop(stack)
+	// The stack must be running before it is used.
+	go func() {
+		failure("stack stopped: " + espradio.RunStack(context.Background(), nd, &stack).Error())
+	}()
 
 	println("starting DHCP...")
-	dhcp, err := stack.SetupWithDHCP(espradio.DHCPConfig{})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	addr, gateway, _, err := stack.EnableDHCP(ctx, true, netip.Addr{})
+	cancel()
 	if err != nil {
 		failure("DHCP failed: " + err.Error())
 	}
 
-	addr, ok := netip.AddrFromSlice(dhcp.AssignedAddr4[:])
-	if !ok {
-		failure("invalid IP address")
-	}
-
 	println("got IP:", addr.String())
-	println("gateway:", dhcp.Router.String())
-	if len(dhcp.DNSServers) > 0 {
-		println("DNS:", dhcp.DNSServers[0].String())
-	}
+	println("gateway:", gateway.String())
 	println("done!")
 	for {
 		time.Sleep(1 * time.Second)
@@ -84,19 +93,7 @@ func main() {
 	}
 }
 
-func stackLoop(stack *espradio.Stack) {
-	for {
-		send, recv, err := stack.RecvAndSend()
-		if send == 0 && recv == 0 {
-			time.Sleep(5 * time.Millisecond)
-		}
-		if err != nil {
-			println("poll err:", err.Error())
-		}
-		_ = send
-		_ = recv
-	}
-}
+func backoff(uint) time.Duration { return 5 * time.Millisecond }
 
 func failure(msg string) {
 	for {

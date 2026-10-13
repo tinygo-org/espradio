@@ -4,11 +4,14 @@
 package main
 
 import (
+	"context"
 	"net/netip"
 	"time"
 
+	"github.com/soypat/lneto"
 	"github.com/soypat/lneto/dhcp/dhcpv4"
 	"github.com/soypat/lneto/ipv4"
+	"github.com/soypat/lneto/x/xnet"
 	"tinygo.org/x/espradio"
 )
 
@@ -47,16 +50,28 @@ func main() {
 	addr := netip.MustParseAddr(apIP)
 	subnet := netip.MustParsePrefix("192.168.4.0/24")
 
+	hw, err := nd.HardwareAddr6()
+	if err != nil {
+		failure("ap: mac err: " + err.Error())
+	}
+
 	println("ap: creating lneto stack...")
-	stack, err := espradio.NewStack(nd, espradio.StackConfig{
-		Hostname:         ssid,
-		StaticAddress:    addr,
-		MaxUDPPorts:      2,
-		AcceptBroadcast4: true,
+	var stack xnet.Netstack
+	err = stack.Reset(xnet.StackConfig{
+		Hostname:            ssid,
+		RandSeed:            time.Now().UnixNano() | 1,
+		HardwareAddress:     hw,
+		MTU:                 1500,
+		StaticAddress4:      addr.As4(),
+		MaxActiveUDPPorts:   2,
+		AcceptIPv4Broadcast: true,
+	}, backoff, xnet.TCPPoolConfig{
+		NewBackoff: func() lneto.BackoffStrategy { return backoff },
 	})
 	if err != nil {
 		failure("ap: stack err: " + err.Error())
 	}
+	stack.StackAsync().SetSubnet4(addr.As4(), uint8(subnet.Bits()))
 
 	println("ap: configuring DHCP server...")
 	err = dhcpServer.Configure(dhcpv4.ServerConfig{
@@ -69,13 +84,15 @@ func main() {
 	}
 
 	// A zero remote address accepts clients that have no IP yet.
-	err = stack.LnetoStack().RegisterUDP4(&dhcpServer, [4]byte{}, dhcpv4.DefaultClientPort)
+	err = stack.StackAsync().RegisterUDP4(&dhcpServer, [4]byte{}, dhcpv4.DefaultClientPort)
 	if err != nil {
 		failure("ap: dhcp server register err: " + err.Error())
 	}
 
 	println("ap: AP is running on", apIP, "- connect to", ssid)
-	go stackLoop(stack)
+	go func() {
+		failure("ap: stack stopped: " + espradio.RunStack(context.Background(), nd, &stack).Error())
+	}()
 	for {
 		time.Sleep(1 * time.Second)
 		rxCb, rxDrop := espradio.NetifRxStats()
@@ -83,19 +100,7 @@ func main() {
 	}
 }
 
-func stackLoop(stack *espradio.Stack) {
-	for {
-		send, recv, err := stack.RecvAndSend()
-		if send == 0 && recv == 0 {
-			time.Sleep(5 * time.Millisecond)
-		}
-		if err != nil {
-			println("poll err:", err.Error())
-		}
-		_ = send
-		_ = recv
-	}
-}
+func backoff(uint) time.Duration { return 5 * time.Millisecond }
 
 func failure(msg string) {
 	for {

@@ -12,6 +12,7 @@
 package main
 
 import (
+	"context"
 	_ "embed"
 	"net/netip"
 	"sync"
@@ -79,26 +80,40 @@ func main() {
 		failure("netdev failed: " + err.Error())
 	}
 
+	hw, err := nd.HardwareAddr6()
+	if err != nil {
+		failure("mac failed: " + err.Error())
+	}
+
 	println("creating lneto stack...")
-	espstack, err := espradio.NewStack(nd, espradio.StackConfig{
-		Hostname:     ssid,
-		MaxUDPPorts:  2,
-		MaxTCPPorts:  1,
-		PassivePeers: 64,
+	var stack xnet.Netstack
+	err = stack.Reset(xnet.StackConfig{
+		Hostname:          ssid,
+		RandSeed:          time.Now().UnixNano() | 1,
+		HardwareAddress:   hw,
+		MTU:               1500,
+		MaxActiveUDPPorts: 2,
+		MaxActiveTCPPorts: 1,
+		PassivePeers:      64,
+	}, pollBackoff, xnet.TCPPoolConfig{
+		NewBackoff: func() lneto.BackoffStrategy { return pollBackoff },
 	})
 	if err != nil {
 		failure("stack failed: " + err.Error())
 	}
 
-	// Start the poll loop in the background.
-	// VERY IMPORTANT TO START BEFORE USING STACK!
-	go loopForeverStack(espstack)
+	// Start the stack in the background before using it.
+	go func() {
+		failure("stack stopped: " + espradio.RunStack(context.Background(), nd, &stack).Error())
+	}()
 
-	dhcp, err := espstack.SetupWithDHCP(espradio.DHCPConfig{})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	addr, _, _, err := stack.EnableDHCP(ctx, true, netip.Addr{})
+	cancel()
 	if err != nil {
 		failure("DHCP failed: " + err.Error())
 	}
-	lstack := espstack.LnetoStack()
+	lstack := stack.StackAsync()
 	tcpPool, err := lstack.NewTCPPool(xnet.TCPPoolConfig{
 		PoolSize:           maxConns,
 		QueueSize:          3,
@@ -110,11 +125,6 @@ func main() {
 	})
 	if err != nil {
 		failure("tcppool create: " + err.Error())
-	}
-
-	addr, ok := netip.AddrFromSlice(dhcp.AssignedAddr4[:])
-	if !ok {
-		failure("invalid IP address")
 	}
 
 	println("got IP:", addr.String())
@@ -201,15 +211,6 @@ func (sv *Server) handleToggleLED(exch *httphi.Exchange) {
 	setLED(sv.ledState)
 	sv.mu.Unlock()
 	exch.Respond(httphi.StatusOK, "", nil)
-}
-
-func loopForeverStack(stack *espradio.Stack) {
-	for {
-		send, recv, _ := stack.RecvAndSend()
-		if send == 0 && recv == 0 {
-			time.Sleep(pollTime)
-		}
-	}
 }
 
 func failure(msg string) {
