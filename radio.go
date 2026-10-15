@@ -1038,6 +1038,12 @@ func Connect(cfg STAConfig) error {
 		}
 		return makeError(C.esp_err_t(res.Reason))
 	case <-time.After(15 * time.Second):
+		// Disconnect does not stop an attempt in progress, so wait for it to end.
+		C.esp_wifi_disconnect_internal()
+		select {
+		case <-connectResult:
+		case <-time.After(15 * time.Second):
+		}
 		return makeError(C.ESP_ERR_TIMEOUT)
 	}
 }
