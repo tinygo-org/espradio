@@ -198,7 +198,7 @@ func failIfErr(msg string, err error) {
 		return
 	}
 	for {
-		println("failure:", msg+":", err.Error())
+		println("stopped after failure:", msg+":", err.Error())
 		time.Sleep(time.Second)
 	}
 }

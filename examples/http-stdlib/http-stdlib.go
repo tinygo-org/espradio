@@ -51,7 +51,7 @@ func hello(w http.ResponseWriter, r *http.Request) {
 
 func failure(msg string) {
 	for {
-		println("failure:", msg)
+		println("stopped after failure:", msg)
 		time.Sleep(1 * time.Second)
 	}
 }

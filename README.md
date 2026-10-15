@@ -36,7 +36,7 @@ func main() {
 	link := &link.Esplink{}
 	netdev.UseNetdev(link)
 
-	println("Connecting to WiFi...")
+	println("Connecting to WiFi...", ssid)
 	failIfErr("connect", link.NetConnect(&nl.ConnectParams{
 		Ssid:       ssid,
 		Passphrase: password,
@@ -45,12 +45,16 @@ func main() {
 	println("Connected to WiFi.")
 	var http httphi.MuxSlice
 	http.Handle("/", func(exch *httphi.Exchange) {
-		exch.RespondString(200, "application/json", `{"message":"hello"}`)
+		exch.RespondString(httphi.StatusOK, "application/json", `{"message":"hello"}`)
 	})
 	var router httphi.Router
 	cfg := httphi.DefaultRouterConfig(4, 2048, http.MaxPathValues())
 	failIfErr("configuring Router", router.Configure(&http, cfg))
-	err := link.ListenAndServe(&router, port)
+	defer router.Shutdown() // Despawns goroutines.
+	addr, err := link.Addr()
+	failIfErr("Esplink.Addr()", err)
+	print("Hosting webserver on http://", addr.String(), ":", port, "\n")
+	err = link.ListenAndServe(&router, port) // Blocks as long as Router can serve connections.
 	failIfErr("Esplink.ListenAndServe", err)
 }
 ```

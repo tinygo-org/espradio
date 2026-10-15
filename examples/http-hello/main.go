@@ -43,7 +43,7 @@ func main() {
 
 func failIfErr(action string, err error) {
 	for err != nil {
-		println("fail " + action + ": " + err.Error())
+		println("stopped after failure:", action+":", err.Error())
 		time.Sleep(1 * time.Second)
 	}
 }

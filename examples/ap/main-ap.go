@@ -108,7 +108,7 @@ func backoff(uint) time.Duration { return 5 * time.Millisecond }
 
 func failure(msg string) {
 	for {
-		println("failure:", msg)
+		println("stopped after failure:", msg)
 		time.Sleep(1 * time.Second)
 	}
 }

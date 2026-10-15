@@ -88,7 +88,7 @@ func main() {
 
 func failure(msg string) {
 	for {
-		println("failure:", msg)
+		println("stopped after failure:", msg)
 		time.Sleep(time.Second)
 	}
 }

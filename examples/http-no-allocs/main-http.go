@@ -369,7 +369,7 @@ func printAddr(addr netip.Addr, buf []byte) {
 
 func failure(msg string) {
 	for {
-		println("failure:", msg)
+		println("stopped after failure:", msg)
 		time.Sleep(1 * time.Second)
 	}
 }
