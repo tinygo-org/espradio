@@ -429,6 +429,8 @@ esp_err_t espradio_sta_set_config(const char *ssid, int ssid_len,
     memset(&cfg, 0, sizeof(cfg));
     if (ssid_len) memcpy(cfg.sta.ssid, ssid, ssid_len);
     if (pwd_len) memcpy(cfg.sta.password, pwd, pwd_len);
+    cfg.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+    cfg.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
     if (pwd_len > 0)
         cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
     return esp_wifi_set_config(WIFI_IF_STA, &cfg);
