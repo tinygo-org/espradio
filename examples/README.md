@@ -220,6 +220,21 @@ incoming connection: 192.168.1.223 from port 53640
 Got webpage request!
 ```
 
+### ntp
+
+Connects with `Esplink` and sets the clock with NTP once per minute.
+
+```
+$ tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=yourssid -X main.password=YourPasswordHere" -monitor ./examples/ntp
+...
+connecting to rems ...
+connected. time is 1970-01-01 00:00:03.919666325 +0000 UTC m=+3.919666326
+NTP offset 497796h45m9.440981188s time is 2026-10-15 12:45:13.714873438 +0000 UTC m=+4.273892251
+NTP offset 10.988838ms time is 2026-10-15 12:46:13.833408001 +0000 UTC m=+64.381437976
+NTP offset 29.531963ms time is 2026-10-15 12:47:14.287554964 +0000 UTC m=+124.806052976
+...
+```
+
 ### ntp-power-save
 
 Synchronizes the clock with NTP once per minute and stops Wi-Fi between syncs. Reuses the same network device and stack across stop/start cycles. On an M5Stack with the original ESP32, stopping Wi-Fi reduced system current by about 50 mA in one test.
