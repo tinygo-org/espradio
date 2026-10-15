@@ -63,6 +63,9 @@ type Config struct {
 	// ArenaPoolSize overrides the default per-target arena pool size (bytes).
 	// Zero means use the target default.
 	ArenaPoolSize int
+	// MaxTxPower caps the TX power in units of 0.25 dBm, range 8 to 84.
+	// Zero keeps the blob default. See SetMaxTxPower.
+	MaxTxPower int8
 }
 
 // AccessPoint represents a Wi-Fi access point discovered during scanning.
@@ -579,6 +582,7 @@ func Enable(config Config) error {
 
 	C.espradio_event_register_default_cb()
 	C.espradio_set_blob_log_level(C.uint32_t(config.Logging))
+	maxTxPower = config.MaxTxPower
 
 	mask := interrupt.Disable()
 	C.espradio_hal_init_clocks_go()
@@ -630,7 +634,7 @@ func Start() error {
 	// our_tx_eb, …) get initialised, then snapshot them.
 	postWiFiStart()
 
-	return nil
+	return applyMaxTxPower()
 }
 
 // postWiFiStart disables modem-sleep and pumps the scheduler so ppTask
@@ -1175,7 +1179,36 @@ func StartAP(cfg APConfig) error {
 	// Same post-start sequence as Start().
 	postWiFiStart()
 
+	return applyMaxTxPower()
+}
+
+var maxTxPower int8
+
+// SetMaxTxPower sets the maximum TX power in units of 0.25 dBm. Wi-Fi must be started.
+// Range is 8 to 84, see esp_wifi_set_max_tx_power in esp-wifi/c/include/esp_wifi.h.
+func SetMaxTxPower(power int8) error {
+	if code := C.esp_wifi_set_max_tx_power(C.int8_t(power)); code != C.ESP_OK {
+		return makeError(code)
+	}
+	maxTxPower = power
 	return nil
+}
+
+// MaxTxPower returns the maximum TX power in units of 0.25 dBm.
+// On ESP32 the blob can report less than was set for values above 56.
+func MaxTxPower() (int8, error) {
+	var power C.int8_t
+	if code := C.esp_wifi_get_max_tx_power(&power); code != C.ESP_OK {
+		return 0, makeError(code)
+	}
+	return int8(power), nil
+}
+
+func applyMaxTxPower() error {
+	if maxTxPower == 0 {
+		return nil
+	}
+	return SetMaxTxPower(maxTxPower)
 }
 
 // ─── RF diagnostics ─────────────────────────────────────────────────────────
