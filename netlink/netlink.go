@@ -211,6 +211,16 @@ func (n *Esplink) GetHostByName(name string) (netip.Addr, error) {
 	return addrs[0], nil
 }
 
+// NTP gets the clock offset from the NTP server host.
+// Pass the offset to runtime.AdjustTimeOffset to set the clock.
+func (n *Esplink) NTP(host string, timeout time.Duration, retries int) (time.Duration, error) {
+	addr, err := n.GetHostByName(host)
+	if err != nil {
+		return 0, err
+	}
+	return n.rstack().DoNTP(addr, timeout, retries)
+}
+
 // parseIPLiteral parses name as an IP address. It reports literal true when name
 // is an address, or only digits and dots, so that names like 9gag.com go to DNS.
 func parseIPLiteral(name string) (addr netip.Addr, literal bool, err error) {
