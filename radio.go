@@ -1101,6 +1101,21 @@ func Disconnect() error {
 	return nil
 }
 
+// ErrNotConnected is returned when the station is not connected to an AP.
+var ErrNotConnected = errors.New("espradio: station not connected")
+
+// RSSI returns the signal strength in dBm of the AP the station is connected to.
+func RSSI() (int, error) {
+	if C.espradio_netif_connected() == 0 {
+		return 0, ErrNotConnected
+	}
+	var rssi C.int
+	if code := C.esp_wifi_sta_get_rssi(&rssi); code != C.ESP_OK {
+		return 0, makeError(code)
+	}
+	return int(rssi), nil
+}
+
 var (
 	linkMu       sync.Mutex
 	linkNotifyCb func(connected bool)

@@ -344,6 +344,10 @@ void espradio_netif_set_connected(int connected) {
     s_sta_connected = connected;
 }
 
+int espradio_netif_connected(void) {
+    return s_sta_connected;
+}
+
 void espradio_netif_set_tx_enabled(int enabled) {
     s_tx_enabled = enabled;
 }
