@@ -26,7 +26,9 @@ type NetDev struct {
 var netDevInstance NetDev
 
 func startNetDev(apMode int) (*NetDev, error) {
-	if code := C.espradio_netif_start_rx(C.int(apMode)); code != C.ESP_OK {
+	var code C.esp_err_t
+	onCore0(func() { code = C.espradio_netif_start_rx(C.int(apMode)) })
+	if code != C.ESP_OK {
 		return nil, makeError(code)
 	}
 	netDevInstance = NetDev{}
@@ -46,6 +48,11 @@ func StartNetDevAP() (*NetDev, error) {
 // SendOffsetEthFrame sends a raw Ethernet frame out the WiFi interface. The frame
 // starts at offset 0, includes the Ethernet header and excludes the CRC.
 func (nd *NetDev) SendOffsetEthFrame(frame []byte) error {
+	if !onCore0Direct() {
+		var err error
+		onCore0(func() { err = nd.SendOffsetEthFrame(frame) })
+		return err
+	}
 	if len(frame) == 0 {
 		return nil
 	}
@@ -68,6 +75,10 @@ func (nd *NetDev) SetEthRecvHandler(handler func(rxEthframe []byte)) {
 // EthPoll pops one received frame following [netdev.DevEthernet]. With no handler the
 // frame goes into buf. With a handler buf may be nil and is unused, and the handler gets the frame.
 func (nd *NetDev) EthPoll(buf []byte) (ethFrameOff, ethernetBytes int, err error) {
+	if !onCore0Direct() {
+		onCore0(func() { ethFrameOff, ethernetBytes, err = nd.EthPoll(buf) })
+		return
+	}
 	if C.espradio_netif_rx_available() == 0 {
 		return 0, 0, nil
 	}
@@ -92,7 +103,12 @@ func (nd *NetDev) EthPoll(buf []byte) (ethFrameOff, ethernetBytes int, err error
 }
 
 // HardwareAddr6 returns the 6-byte MAC address of the WiFi interface.
-func (nd *NetDev) HardwareAddr6() (mac [6]byte, _ error) {
+func (nd *NetDev) HardwareAddr6() (v [6]byte, err error) {
+	onCore0(func() { v, err = nd.hardwareAddr6() })
+	return
+}
+
+func (nd *NetDev) hardwareAddr6() (mac [6]byte, _ error) {
 	code := C.espradio_netif_get_mac((*C.uint8_t)(unsafe.Pointer(&mac[0])))
 	if code != C.ESP_OK {
 		return mac, makeError(code)

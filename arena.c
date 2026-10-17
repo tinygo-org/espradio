@@ -78,7 +78,7 @@ void espradio_arena_init(uint8_t *base, size_t cap) {
     free_list = base;
 }
 
-void *espradio_arena_alloc(size_t size) {
+static void *arena_alloc(size_t size) {
     if (size == 0) size = 1;
     if (size > arena_cap) return NULL;
     /* Round payload up to alignment */
@@ -121,15 +121,15 @@ void *espradio_arena_alloc(size_t size) {
     return NULL;
 }
 
-void *espradio_arena_calloc(size_t n, size_t size) {
+static void *arena_calloc(size_t n, size_t size) {
     if (size != 0 && n > SIZE_MAX / size) return NULL;
     size_t total = n * size;
-    void *p = espradio_arena_alloc(total);
+    void *p = arena_alloc(total);
     if (p) memset(p, 0, total);
     return p;
 }
 
-void espradio_arena_free(void *p) {
+static void arena_free(void *p) {
     if (!p) return;
     uint8_t *blk = PAYLOAD_BLK(p);
 
@@ -193,30 +193,30 @@ void espradio_arena_free(void *p) {
     free_list = blk;
 }
 
-void *espradio_arena_realloc(void *ptr, size_t new_size) {
-    if (!ptr) return espradio_arena_alloc(new_size);
-    if (new_size == 0) { espradio_arena_free(ptr); return NULL; }
+static void *arena_realloc(void *ptr, size_t new_size) {
+    if (!ptr) return arena_alloc(new_size);
+    if (new_size == 0) { arena_free(ptr); return NULL; }
 
     uint8_t *blk = PAYLOAD_BLK(ptr);
-    /* Reject non-arena pointers (see espradio_arena_free comment). */
+    /* Reject non-arena pointers (see the arena_free comment). */
     if (blk < arena_base || blk >= arena_base + arena_cap) {
-        return espradio_arena_alloc(new_size);
+        return arena_alloc(new_size);
     }
     size_t old_total = BLK_SIZE(blk);
     if (old_total == 0 || old_total > arena_cap || blk + old_total > arena_base + arena_cap) {
-        return espradio_arena_alloc(new_size);
+        return arena_alloc(new_size);
     }
     size_t old_payload = old_total - OVERHEAD;
 
-    void *np = espradio_arena_alloc(new_size);
+    void *np = arena_alloc(new_size);
     if (np) {
         memcpy(np, ptr, old_payload < new_size ? old_payload : new_size);
-        espradio_arena_free(ptr);
+        arena_free(ptr);
     }
     return np;
 }
 
-void espradio_arena_stats(uint32_t *used, uint32_t *capacity) {
+static void arena_stats(uint32_t *used, uint32_t *capacity) {
     /* Walk all blocks to compute used bytes */
     uint32_t u = 0;
     uint8_t *blk = arena_base;
@@ -229,6 +229,51 @@ void espradio_arena_stats(uint32_t *used, uint32_t *capacity) {
     }
     if (used)     *used     = u;
     if (capacity) *capacity = (uint32_t)arena_cap;
+}
+
+/* The wrapped malloc can run on either core with the cores scheduler. */
+static volatile int arena_lock;
+
+static void arena_lock_take(void) {
+    while (__sync_lock_test_and_set(&arena_lock, 1)) {
+    }
+}
+
+static void arena_lock_give(void) {
+    __sync_lock_release(&arena_lock);
+}
+
+void *espradio_arena_alloc(size_t size) {
+    arena_lock_take();
+    void *p = arena_alloc(size);
+    arena_lock_give();
+    return p;
+}
+
+void *espradio_arena_calloc(size_t n, size_t size) {
+    arena_lock_take();
+    void *p = arena_calloc(n, size);
+    arena_lock_give();
+    return p;
+}
+
+void espradio_arena_free(void *p) {
+    arena_lock_take();
+    arena_free(p);
+    arena_lock_give();
+}
+
+void *espradio_arena_realloc(void *ptr, size_t new_size) {
+    arena_lock_take();
+    void *p = arena_realloc(ptr, new_size);
+    arena_lock_give();
+    return p;
+}
+
+void espradio_arena_stats(uint32_t *used, uint32_t *capacity) {
+    arena_lock_take();
+    arena_stats(used, capacity);
+    arena_lock_give();
 }
 
 #ifdef __XTENSA__

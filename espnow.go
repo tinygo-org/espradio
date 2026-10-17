@@ -79,7 +79,12 @@ var (
 )
 
 // ESPNowInit initializes the ESP-NOW subsystem and registers callback trampolines.
-func ESPNowInit() error {
+func ESPNowInit() (err error) {
+	onCore0(func() { err = espNowInit() })
+	return
+}
+
+func espNowInit() error {
 	if code := C.esp_now_init(); code != C.ESP_OK {
 		return makeError(code)
 	}
@@ -96,7 +101,12 @@ func ESPNowInit() error {
 }
 
 // ESPNowDeinit deinitializes ESP-NOW and unregisters any callback trampolines.
-func ESPNowDeinit() error {
+func ESPNowDeinit() (err error) {
+	onCore0(func() { err = espNowDeinit() })
+	return
+}
+
+func espNowDeinit() error {
 	if code := C.esp_now_unregister_recv_cb(); code != C.ESP_OK {
 		return makeError(code)
 	}
@@ -110,7 +120,12 @@ func ESPNowDeinit() error {
 }
 
 // ESPNowVersion returns the underlying ESP-NOW version reported by the SDK.
-func ESPNowVersion() (uint32, error) {
+func ESPNowVersion() (v uint32, err error) {
+	onCore0(func() { v, err = espNowVersion() })
+	return
+}
+
+func espNowVersion() (uint32, error) {
 	var version C.uint32_t
 	if code := C.esp_now_get_version(&version); code != C.ESP_OK {
 		return 0, makeError(code)
@@ -119,7 +134,12 @@ func ESPNowVersion() (uint32, error) {
 }
 
 // ESPNowSetPrimaryMasterKey configures the 16-byte PMK used to encrypt LMKs.
-func ESPNowSetPrimaryMasterKey(key [ESPNowKeyLength]byte) error {
+func ESPNowSetPrimaryMasterKey(key [ESPNowKeyLength]byte) (err error) {
+	onCore0(func() { err = espNowSetPrimaryMasterKey(key) })
+	return
+}
+
+func espNowSetPrimaryMasterKey(key [ESPNowKeyLength]byte) error {
 	return makeError(C.esp_now_set_pmk((*C.uint8_t)(unsafe.Pointer(&key[0]))))
 }
 
@@ -138,7 +158,12 @@ func ESPNowSetSendHandler(handler func(ESPNowSendReport)) {
 }
 
 // ESPNowSend sends a packet to one peer, or to all peers when peer is nil.
-func ESPNowSend(peer *[ESPNowAddressLength]byte, data []byte) error {
+func ESPNowSend(peer *[ESPNowAddressLength]byte, data []byte) (err error) {
+	onCore0(func() { err = espNowSend(peer, data) })
+	return
+}
+
+func espNowSend(peer *[ESPNowAddressLength]byte, data []byte) error {
 	var peerPtr *C.uint8_t
 	if peer != nil {
 		peerPtr = (*C.uint8_t)(unsafe.Pointer(&peer[0]))
@@ -151,24 +176,44 @@ func ESPNowSend(peer *[ESPNowAddressLength]byte, data []byte) error {
 }
 
 // ESPNowAddPeer adds a peer to the SDK-maintained peer table.
-func ESPNowAddPeer(peer ESPNowPeer) error {
+func ESPNowAddPeer(peer ESPNowPeer) (err error) {
+	onCore0(func() { err = espNowAddPeer(peer) })
+	return
+}
+
+func espNowAddPeer(peer ESPNowPeer) error {
 	cpeer := cESPNowPeer(peer)
 	return makeError(C.esp_now_add_peer(&cpeer))
 }
 
 // ESPNowDeletePeer removes a peer from the SDK-maintained peer table.
-func ESPNowDeletePeer(addr [ESPNowAddressLength]byte) error {
+func ESPNowDeletePeer(addr [ESPNowAddressLength]byte) (err error) {
+	onCore0(func() { err = espNowDeletePeer(addr) })
+	return
+}
+
+func espNowDeletePeer(addr [ESPNowAddressLength]byte) error {
 	return makeError(C.esp_now_del_peer((*C.uint8_t)(unsafe.Pointer(&addr[0]))))
 }
 
 // ESPNowModifyPeer updates an existing peer record.
-func ESPNowModifyPeer(peer ESPNowPeer) error {
+func ESPNowModifyPeer(peer ESPNowPeer) (err error) {
+	onCore0(func() { err = espNowModifyPeer(peer) })
+	return
+}
+
+func espNowModifyPeer(peer ESPNowPeer) error {
 	cpeer := cESPNowPeer(peer)
 	return makeError(C.esp_now_mod_peer(&cpeer))
 }
 
 // ESPNowGetPeer looks up a peer by MAC address.
-func ESPNowGetPeer(addr [ESPNowAddressLength]byte) (ESPNowPeer, error) {
+func ESPNowGetPeer(addr [ESPNowAddressLength]byte) (v ESPNowPeer, err error) {
+	onCore0(func() { v, err = espNowGetPeer(addr) })
+	return
+}
+
+func espNowGetPeer(addr [ESPNowAddressLength]byte) (ESPNowPeer, error) {
 	var cpeer C.esp_now_peer_info_t
 	if code := C.esp_now_get_peer((*C.uint8_t)(unsafe.Pointer(&addr[0])), &cpeer); code != C.ESP_OK {
 		return ESPNowPeer{}, makeError(code)
@@ -177,7 +222,12 @@ func ESPNowGetPeer(addr [ESPNowAddressLength]byte) (ESPNowPeer, error) {
 }
 
 // ESPNowFetchPeer fetches the next peer from the peer table.
-func ESPNowFetchPeer(fromHead bool) (ESPNowPeer, error) {
+func ESPNowFetchPeer(fromHead bool) (v ESPNowPeer, err error) {
+	onCore0(func() { v, err = espNowFetchPeer(fromHead) })
+	return
+}
+
+func espNowFetchPeer(fromHead bool) (ESPNowPeer, error) {
 	var cpeer C.esp_now_peer_info_t
 	if code := C.espradio_esp_now_fetch_peer(C.int(boolToInt(fromHead)), &cpeer); code != C.ESP_OK {
 		return ESPNowPeer{}, makeError(code)
@@ -186,12 +236,22 @@ func ESPNowFetchPeer(fromHead bool) (ESPNowPeer, error) {
 }
 
 // ESPNowPeerExists reports whether a peer exists in the peer table.
-func ESPNowPeerExists(addr [ESPNowAddressLength]byte) bool {
+func ESPNowPeerExists(addr [ESPNowAddressLength]byte) (v bool) {
+	onCore0(func() { v = espNowPeerExists(addr) })
+	return
+}
+
+func espNowPeerExists(addr [ESPNowAddressLength]byte) bool {
 	return bool(C.esp_now_is_peer_exist((*C.uint8_t)(unsafe.Pointer(&addr[0]))))
 }
 
 // ESPNowGetPeerCount returns the total and encrypted peer counts.
-func ESPNowGetPeerCount() (ESPNowPeerCount, error) {
+func ESPNowGetPeerCount() (v ESPNowPeerCount, err error) {
+	onCore0(func() { v, err = espNowGetPeerCount() })
+	return
+}
+
+func espNowGetPeerCount() (ESPNowPeerCount, error) {
 	var counts C.esp_now_peer_num_t
 	if code := C.esp_now_get_peer_num(&counts); code != C.ESP_OK {
 		return ESPNowPeerCount{}, makeError(code)
