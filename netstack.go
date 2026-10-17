@@ -12,7 +12,13 @@ import (
 
 // RunStack runs stack over nd with a lneto netdev Runner until ctx is done.
 // Start it on its own goroutine before using the stack.
-func RunStack(ctx context.Context, nd *NetDev, stack *xnet.Netstack) error {
+// With the cores scheduler the whole loop runs on core 0, next to the blob.
+func RunStack(ctx context.Context, nd *NetDev, stack *xnet.Netstack) (err error) {
+	onCore0(func() { err = runStack(ctx, nd, stack) })
+	return
+}
+
+func runStack(ctx context.Context, nd *NetDev, stack *xnet.Netstack) error {
 	var iface netdev.Interface[STAConfig]
 	if err := iface.Init(noLink{}, nd, netdev.InterfaceConfig{}); err != nil {
 		return err

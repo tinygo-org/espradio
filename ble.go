@@ -56,7 +56,12 @@ func (t VHCITransport) Read(buf []byte) (int, error) {
 }
 
 // Write sends an HCI packet to the BLE controller.
-func (t VHCITransport) Write(buf []byte) (int, error) {
+func (t VHCITransport) Write(buf []byte) (v int, err error) {
+	onCore0(func() { v, err = t.write(buf) })
+	return
+}
+
+func (t VHCITransport) write(buf []byte) (int, error) {
 	if len(buf) == 0 {
 		return 0, nil
 	}
@@ -66,7 +71,12 @@ func (t VHCITransport) Write(buf []byte) (int, error) {
 
 // BLEInit initializes the BLE controller.
 // Must be called before using VHCITransport.
-func BLEInit() error {
+func BLEInit() (err error) {
+	onCore0(func() { err = bleInit() })
+	return
+}
+
+func bleInit() error {
 	// Ensure radio hardware is powered up (clocks, power domain, modem reset).
 	// This is normally done by Enable() for WiFi, but BLE may be used standalone.
 	if err := initHardware(); err != nil {
@@ -83,7 +93,7 @@ func BLEInit() error {
 
 	// Start scheduler ticker if not already running (provides periodic
 	// execution for the BLE controller task goroutine via kickSched).
-	if isrKick == nil {
+	if !schedStarted {
 		startSchedTicker()
 	}
 
