@@ -100,19 +100,16 @@ type APConfig struct {
 
 const schedTickerMs = 5
 
-var isrKick chan struct{}
+var schedStarted bool
 
 func startSchedTicker() {
-	isrKick = make(chan struct{}, 1)
+	schedStarted = true
+	initKick()
 	schedPassesStart = time.Now()
 	go func() {
-		ticker := time.NewTicker(schedTickerMs * time.Millisecond)
-		defer ticker.Stop()
+		pinCore0()
 		for {
-			select {
-			case <-ticker.C:
-			case <-isrKick:
-			}
+			waitSchedKick()
 			schedOnce()
 			runtime.Gosched()
 		}
@@ -364,18 +361,12 @@ func espradio_pump_sched_once() {
 	pumpSched()
 }
 
-// kickSched wakes the scheduler goroutine immediately.
+// kickSched wakes the scheduler goroutine immediately. It is in core0_*.go.
 //
 // Use this only for a real hardware event, which must be serviced now.  Every
-// other caller should use kickSchedThrottled: the ticker is woken by the kick
-// channel, so an unthrottled kick on a path the blob takes thousands of times a
+// other caller should use kickSchedThrottled: the ticker is woken by the kick,
+// so an unthrottled kick on a path the blob takes thousands of times a
 // second replaces the 5 ms tick entirely.
-func kickSched() {
-	select {
-	case isrKick <- struct{}{}:
-	default:
-	}
-}
 
 // Kick throttling.
 //
@@ -537,7 +528,12 @@ func enableFailed(err error) error {
 // Enable is not idempotent and returns ErrAlreadyEnabled on a second call.  If an
 // earlier call failed, every later one returns ErrEnableFailed: a partially
 // initialised radio cannot be unwound, so the device must be reset.
-func Enable(config Config) error {
+func Enable(config Config) (err error) {
+	onCore0(func() { err = enable(config) })
+	return
+}
+
+func enable(config Config) error {
 	if !atomic.CompareAndSwapUint32(&wifiEnabled, wifiStateOff, wifiStateOn) {
 		if atomic.LoadUint32(&wifiEnabled) == wifiStateFailed {
 			return ErrEnableFailed
@@ -563,7 +559,7 @@ func Enable(config Config) error {
 		C.espradio_arena_init((*C.uint8_t)(unsafe.Pointer(&arenaPool[0])), C.size_t(len(arenaPool)))
 	}
 
-	if isrKick == nil {
+	if !schedStarted {
 		startSchedTicker()
 	}
 	time.Sleep(schedTickerMs * time.Millisecond)
@@ -606,7 +602,12 @@ func Enable(config Config) error {
 // configuration (e.g. country code) before starting, and to allow scanning without
 // starting the driver.  Start calls schedOnce in a loop to let the blob process
 // its internal startup sequence (posting events, etc.) before Start returns.
-func Start() error {
+func Start() (err error) {
+	onCore0(func() { err = start() })
+	return
+}
+
+func start() error {
 	var mode C.wifi_mode_t
 	if code := C.esp_wifi_get_mode(&mode); code != C.ESP_OK {
 		return makeError(code)
@@ -670,7 +671,12 @@ func postWiFiStart() {
 
 // Stop stops the Wi-Fi driver and powers down the radio.
 // It does nothing if the driver is not started.
-func Stop() error {
+func Stop() (err error) {
+	onCore0(func() { err = stop() })
+	return
+}
+
+func stop() error {
 	if atomic.LoadUint32(&wifiStarted) == 0 {
 		return nil
 	}
@@ -912,7 +918,12 @@ const (
 )
 
 // Scan performs a single Wi-Fi scan pass and returns the list of discovered access points.
-func Scan() ([]AccessPoint, error) {
+func Scan() (v []AccessPoint, err error) {
+	onCore0(func() { v, err = scan() })
+	return
+}
+
+func scan() ([]AccessPoint, error) {
 	C.espradio_ensure_osi_ptr()
 	C.esp_wifi_set_ps(C.WIFI_PS_NONE)
 	C.espradio_set_country_eu_manual()
@@ -994,7 +1005,12 @@ func stringData(s string) *C.char {
 
 // Connect configures STA credentials and initiates association.
 // Blocks until CONNECTED, DISCONNECTED or timeout.
-func Connect(cfg STAConfig) error {
+func Connect(cfg STAConfig) (err error) {
+	onCore0(func() { err = connect(cfg) })
+	return
+}
+
+func connect(cfg STAConfig) error {
 	connectMu.Lock()
 	connectResult = make(chan ConnectResult, 1)
 	staLinkUp = false
@@ -1098,7 +1114,12 @@ func reportConnect(res ConnectResult) {
 }
 
 // Disconnect disconnects the station from its access point.
-func Disconnect() error {
+func Disconnect() (err error) {
+	onCore0(func() { err = disconnect() })
+	return
+}
+
+func disconnect() error {
 	if code := C.esp_wifi_disconnect_internal(); code != C.ESP_OK {
 		return makeError(code)
 	}
@@ -1109,7 +1130,12 @@ func Disconnect() error {
 var ErrNotConnected = errors.New("espradio: station not connected")
 
 // RSSI returns the signal strength in dBm of the AP the station is connected to.
-func RSSI() (int, error) {
+func RSSI() (v int, err error) {
+	onCore0(func() { v, err = rssi() })
+	return
+}
+
+func rssi() (int, error) {
 	if C.espradio_netif_connected() == 0 {
 		return 0, ErrNotConnected
 	}
@@ -1154,7 +1180,12 @@ func SetLinkNotify(cb func(connected bool)) {
 // ─── Soft-AP ─────────────────────────────────────────────────────────────────
 
 // StartAP starts the radio in soft-AP mode with the given configuration.
-func StartAP(cfg APConfig) error {
+func StartAP(cfg APConfig) (err error) {
+	onCore0(func() { err = startAP(cfg) })
+	return
+}
+
+func startAP(cfg APConfig) error {
 	if code := C.esp_wifi_set_mode(C.WIFI_MODE_AP); code != C.ESP_OK {
 		return makeError(code)
 	}
@@ -1186,7 +1217,12 @@ var maxTxPower int8
 
 // SetMaxTxPower sets the maximum TX power in units of 0.25 dBm. Wi-Fi must be started.
 // Range is 8 to 84, see esp_wifi_set_max_tx_power in esp-wifi/c/include/esp_wifi.h.
-func SetMaxTxPower(power int8) error {
+func SetMaxTxPower(power int8) (err error) {
+	onCore0(func() { err = setMaxTxPower(power) })
+	return
+}
+
+func setMaxTxPower(power int8) error {
 	if code := C.esp_wifi_set_max_tx_power(C.int8_t(power)); code != C.ESP_OK {
 		return makeError(code)
 	}
@@ -1196,7 +1232,12 @@ func SetMaxTxPower(power int8) error {
 
 // MaxTxPower returns the maximum TX power in units of 0.25 dBm.
 // On ESP32 the blob can report less than was set for values above 56.
-func MaxTxPower() (int8, error) {
+func MaxTxPower() (v int8, err error) {
+	onCore0(func() { v, err = getMaxTxPower() })
+	return
+}
+
+func getMaxTxPower() (int8, error) {
 	var power C.int8_t
 	if code := C.esp_wifi_get_max_tx_power(&power); code != C.ESP_OK {
 		return 0, makeError(code)
@@ -1213,7 +1254,12 @@ func applyMaxTxPower() error {
 
 // ─── RF diagnostics ─────────────────────────────────────────────────────────
 
-func SniffCountOnChannel(channel uint8, duration time.Duration) (uint32, error) {
+func SniffCountOnChannel(channel uint8, duration time.Duration) (v uint32, err error) {
+	onCore0(func() { v, err = sniffCountOnChannel(channel, duration) })
+	return
+}
+
+func sniffCountOnChannel(channel uint8, duration time.Duration) (uint32, error) {
 	if duration <= 0 {
 		duration = 1500 * time.Millisecond
 	}
@@ -1229,7 +1275,12 @@ func SniffCountOnChannel(channel uint8, duration time.Duration) (uint32, error) 
 }
 
 // BeginMonitor enters promiscuous mode on channel (1 to 13). Do not scan or connect until EndMonitor.
-func BeginMonitor(channel uint8) error {
+func BeginMonitor(channel uint8) (err error) {
+	onCore0(func() { err = beginMonitor(channel) })
+	return
+}
+
+func beginMonitor(channel uint8) error {
 	if code := C.espradio_sniff_begin(C.uint8_t(channel)); code != C.ESP_OK {
 		return makeError(code)
 	}
@@ -1243,7 +1294,12 @@ func StationMAC() ([6]byte, error) {
 }
 
 // EndMonitor leaves promiscuous mode. It does not restore the previous channel.
-func EndMonitor() error {
+func EndMonitor() (err error) {
+	onCore0(func() { err = endMonitor() })
+	return
+}
+
+func endMonitor() error {
 	if code := C.espradio_sniff_end(); code != C.ESP_OK {
 		return makeError(code)
 	}
@@ -1251,7 +1307,12 @@ func EndMonitor() error {
 }
 
 // StartRawTXTracking registers the transmit-complete callback and zeroes the counters.
-func StartRawTXTracking() error {
+func StartRawTXTracking() (err error) {
+	onCore0(func() { err = startRawTXTracking() })
+	return
+}
+
+func startRawTXTracking() error {
 	if code := C.espradio_raw_tx_track(); code != C.ESP_OK {
 		return makeError(code)
 	}
@@ -1272,7 +1333,12 @@ func RawFramesFailed() uint32 {
 
 // SendRawFrame queues a complete 802.11 MAC frame. Pass driverSeq true once
 // connected so the driver owns the sequence field, false to set it yourself.
-func SendRawFrame(frame []byte, driverSeq bool) error {
+func SendRawFrame(frame []byte, driverSeq bool) (err error) {
+	onCore0(func() { err = sendRawFrame(frame, driverSeq) })
+	return
+}
+
+func sendRawFrame(frame []byte, driverSeq bool) error {
 	if len(frame) < 24 || len(frame) > 1500 {
 		return errors.New("espradio: frame length must be 24 to 1500 bytes")
 	}
@@ -1310,9 +1376,11 @@ func espradio_run_task(task_func, param unsafe.Pointer)
 func espradio_task_create_pinned_to_core(task_func unsafe.Pointer, name *C.char, stack_depth uint32, param unsafe.Pointer, prio uint32, task_handle *unsafe.Pointer, core_id uint32) int32 {
 	var ready uint32
 	go func() {
+		pinCore0()
 		*task_handle = tinygo_task_current()
 		atomic.StoreUint32(&ready, 1)
 		espradio_run_task(task_func, param)
+		unpinCore0()
 	}()
 	for atomic.LoadUint32(&ready) == 0 {
 		runtime.Gosched()
