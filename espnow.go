@@ -160,7 +160,16 @@ func ESPNowSetSendHandler(handler func(ESPNowSendReport)) {
 }
 
 // ESPNowSend sends a packet to one peer, or to all peers when peer is nil.
-func ESPNowSend(peer *[ESPNowAddressLength]byte, data []byte) (err error) {
+// From a goroutine pinned with LockToCore0 it does not allocate.
+func ESPNowSend(peer *[ESPNowAddressLength]byte, data []byte) error {
+	if onCore0Direct() {
+		return espNowSend(peer, data)
+	}
+	return espNowSendOnCore0(peer, data)
+}
+
+// espNowSendOnCore0 keeps the closure out of ESPNowSend, since its captured values are allocated.
+func espNowSendOnCore0(peer *[ESPNowAddressLength]byte, data []byte) (err error) {
 	onCore0(func() { err = espNowSend(peer, data) })
 	return
 }
