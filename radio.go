@@ -1274,6 +1274,20 @@ func sniffCountOnChannel(channel uint8, duration time.Duration) (uint32, error) 
 	return packets, nil
 }
 
+// SetChannel sets the Wi-Fi channel, 1 to 13. Use it after Start and before ESP-NOW,
+// so peers with Channel 0 send and receive there. See esp_wifi_set_channel in esp_wifi.h.
+func SetChannel(channel uint8) (err error) {
+	onCore0(func() { err = setChannel(channel) })
+	return
+}
+
+func setChannel(channel uint8) error {
+	if code := C.espradio_set_channel(C.uint8_t(channel)); code != C.ESP_OK {
+		return makeError(code)
+	}
+	return nil
+}
+
 // BeginMonitor enters promiscuous mode on channel (1 to 13). Do not scan or connect until EndMonitor.
 func BeginMonitor(channel uint8) (err error) {
 	onCore0(func() { err = beginMonitor(channel) })

@@ -65,6 +65,7 @@ int rtc_get_reset_reason(int cpu_no);
 esp_err_t espradio_set_country_eu_manual(void);
 esp_err_t espradio_sta_set_config(const char *ssid, int ssid_len,
                                   const char *pwd, int pwd_len);
+esp_err_t espradio_set_channel(uint8_t channel);
 esp_err_t espradio_sniff_begin(uint8_t channel);
 esp_err_t espradio_sniff_end(void);
 uint32_t espradio_sniff_count(void);
