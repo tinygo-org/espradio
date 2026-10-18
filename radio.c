@@ -453,6 +453,10 @@ esp_err_t espradio_ap_set_config(const char *ssid, int ssid_len,
     return esp_wifi_set_config(WIFI_IF_AP, &cfg);
 }
 
+esp_err_t espradio_set_channel(uint8_t channel) {
+    return esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
+}
+
 static volatile uint32_t espradio_sniff_packets = 0;
 
 static void espradio_promisc_rx_cb(void *buf, wifi_promiscuous_pkt_type_t type) {
