@@ -59,7 +59,8 @@ type ESPNowReceive struct {
 	SecondaryChannel   uint8
 	NoiseFloor         int8
 	Timestamp          uint32
-	Data               []byte
+	// Data points into the radio's buffer and is only valid during the handler call.
+	Data []byte
 }
 
 type ESPNowSendReport struct {
@@ -144,6 +145,7 @@ func espNowSetPrimaryMasterKey(key [ESPNowKeyLength]byte) error {
 }
 
 // ESPNowSetReceiveHandler installs the Go callback for incoming ESP-NOW packets.
+// The handler must copy Data to keep it, so receiving does not allocate.
 func ESPNowSetReceiveHandler(handler func(ESPNowReceive)) {
 	espNowMu.Lock()
 	espNowRecvHandler = handler
@@ -315,7 +317,7 @@ func espradio_on_esp_now_recv(srcAddr, destAddr *C.uint8_t, rssi C.int, channel,
 		Timestamp:          uint32(timestamp),
 	}
 	if data != nil && dataLen > 0 {
-		event.Data = C.GoBytes(unsafe.Pointer(data), dataLen)
+		event.Data = unsafe.Slice((*byte)(unsafe.Pointer(data)), int(dataLen))
 	}
 	if handler != nil {
 		handler(event)
