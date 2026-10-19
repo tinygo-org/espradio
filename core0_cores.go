@@ -28,12 +28,14 @@ func pinCore0() {
 	core0Mu.Unlock()
 }
 
-// unpinCore0 must be called by a pinned goroutine before it exits.
+// unpinCore0 must be called by a pinned goroutine before it exits. It also
+// frees the thread semaphore that the goroutine's blob calls took.
 func unpinCore0() {
 	t := tinygo_task_current()
 	core0Mu.Lock()
 	delete(core0Tasks, t)
 	core0Mu.Unlock()
+	releaseThreadSem(t)
 }
 
 // onCore0Direct reports whether the caller was pinned with pinCore0.
@@ -56,7 +58,6 @@ func onCore0(fn func()) {
 		pinCore0()
 		fn()
 		unpinCore0()
-		releaseThreadSem(tinygo_task_current())
 		close(done)
 	}()
 	<-done
