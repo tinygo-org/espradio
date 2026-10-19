@@ -56,6 +56,7 @@ func onCore0(fn func()) {
 		pinCore0()
 		fn()
 		unpinCore0()
+		releaseThreadSem(tinygo_task_current())
 		close(done)
 	}()
 	<-done
