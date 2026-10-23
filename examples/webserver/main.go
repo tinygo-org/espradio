@@ -50,7 +50,6 @@ func main() {
 		Ssid:       ssid,
 		Passphrase: password,
 	}))
-
 	println("Connected to WiFi")
 
 	scratchPool.New = func() interface{} { return make([]byte, scratchSize) }
