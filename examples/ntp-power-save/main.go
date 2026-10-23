@@ -104,7 +104,7 @@ func syncTime(stack *xnet.Netstack) {
 		Password: password,
 	})
 	if err != nil {
-		println("connect failed:", err.Error())
+		println("connect failed (ensure antenna connected):", err.Error())
 		stopRadio()
 		return
 	}

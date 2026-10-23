@@ -33,7 +33,7 @@ func main() {
 	})
 
 	println("connecting to", ssid, "...")
-	failIfErr("connect", link.LinkConnect(params))
+	failIfErr("connect (ensure antenna connected)", link.LinkConnect(params))
 	dev := link.NetDev()
 
 	hw, err := dev.HardwareAddr6()

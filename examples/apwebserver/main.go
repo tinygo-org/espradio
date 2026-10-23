@@ -26,10 +26,14 @@ var indexHTML string
 var sixlinesHTML string
 
 var (
-	ssid     string
-	password string
-	port     uint16 = 80
+	ssid     string // = "yourssid"
+	password string // = "yourpassword"
 )
+
+// Limit TX power for stability. Valid range is 8-84; zero keeps the blob default.
+var maxTxPower int8 = 0
+
+const port uint16 = 80
 
 const apIP = "192.168.4.1"
 
@@ -37,9 +41,11 @@ func main() {
 	// wait a bit for serial
 	time.Sleep(2 * time.Second)
 
-	lnk := &link.Esplink{}
+	lnk := &link.Esplink{
+		MaxTxPower: maxTxPower,
+	}
 
-	println("Starting AP...")
+	println("Starting AP", ssid+"...")
 	failIfErr("starting AP", lnk.NetConnectAP(link.APConnectParams{
 		APConfig: espradio.APConfig{
 			SSID:     ssid,
@@ -52,8 +58,10 @@ func main() {
 		MaxTCPPorts:      4,
 		PassivePeers:     64,
 	}))
+	println("AP Successfully started")
 
 	var http httphi.MuxSlice
+
 	http.Handle("/", logRequest(root))
 	http.Handle("/hello", logRequest(hello))
 	http.Handle("/cnt", logRequest(cnt))
@@ -66,9 +74,11 @@ func main() {
 	cfg := httphi.DefaultRouterConfig(maxConns, httpMemoryPerConn, http.MaxPathValues())
 	failIfErr("configuring Router", router.Configure(&http, cfg))
 	defer router.Shutdown() // Despawns goroutines.
+
 	addr, err := lnk.Addr()
 	failIfErr("Esplink.Addr()", err)
 	print("Hosting webserver on http://", addr.String(), ":", port, "\n")
+
 	err = lnk.ListenAndServe(&router, port) // Blocks as long as Router can serve connections.
 	failIfErr("Esplink.ListenAndServe", err)
 }

@@ -39,6 +39,9 @@ type Esplink struct {
 
 	// ArenaPoolSize overrides the default arena pool size (bytes). Zero uses target default.
 	ArenaPoolSize int
+
+	// MaxTxPower caps the TX power in units of 0.25 dBm, range 8 to 84. Zero keeps the blob default.
+	MaxTxPower int8
 }
 
 func (n *Esplink) rstack() xnet.StackRetrying {
@@ -58,6 +61,7 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 	n.link.Config = espradio.Config{
 		Logging:       espradio.LogLevelError,
 		ArenaPoolSize: n.ArenaPoolSize,
+		MaxTxPower:    n.MaxTxPower,
 	}
 	n.link.LinkNotify(n.onLink)
 	err := n.link.LinkConnect(espradio.STAConfig{
@@ -156,7 +160,8 @@ func (n *Esplink) onLink(connected bool) (int, espradio.STAConfig) {
 	return 0, espradio.STAConfig{}
 }
 
-func (n *Esplink) StackGo() xnet.StackGo { return *n.ns.StackGo() }
+func (n *Esplink) StackGo() *xnet.StackGo       { return n.ns.StackGo() }
+func (n *Esplink) StackAsync() *xnet.StackAsync { return n.ns.StackAsync() }
 
 // NetDisconnect device from network
 func (n *Esplink) NetDisconnect() {

@@ -32,7 +32,7 @@ func main() {
 		Passphrase: password,
 	})
 	if err != nil {
-		failure("WiFi connect failed: " + err.Error())
+		failure("WiFi connect failed (ensure antenna connected): " + err.Error())
 	}
 
 	println("Connected. Getting URL...")
