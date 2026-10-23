@@ -23,30 +23,39 @@ var indexHTML string
 //go:embed sixlines.html
 var sixlinesHTML string
 
+var (
+	ssid     string // = "yourssid"
+	password string // = "yourpassword"
+)
+
+// Limit TX power for stability. Valid range is 8-84; zero keeps the blob default.
+var maxTxPower int8 = 0
+
+const port uint16 = 80
+
 var scratchPool sync.Pool // Stores []byte buffers to avoid allocations in HTTP handlers.
 
 const scratchSize = 128
-const port uint16 = 80 // HTTP listening port.
-
-var (
-	ssid     string
-	password string
-)
 
 func main() {
 	// wait a bit for serial
 	time.Sleep(2 * time.Second)
 
-	link := &link.Esplink{}
+	link := &link.Esplink{
+		MaxTxPower: maxTxPower,
+	}
 
-	println("Connecting to WiFi...")
-	err := link.NetConnect(&nl.ConnectParams{
+	println("Connecting to WiFi", ssid+"...")
+	failIfErr("connect", link.NetConnect(&nl.ConnectParams{
 		Ssid:       ssid,
 		Passphrase: password,
-	})
-	failIfErr("Connecting to WiFi", err)
+	}))
+	println("Connected to WiFi")
+
 	scratchPool.New = func() interface{} { return make([]byte, scratchSize) }
+
 	var http httphi.MuxSlice
+
 	http.Handle("/", logRequest(root))
 	http.Handle("/hello", logRequest(hello))
 	http.Handle("/cnt", logRequest(cnt))
@@ -54,15 +63,18 @@ func main() {
 	http.Handle("/off", logRequest(LED_OFF))
 	http.Handle("/on", logRequest(LED_ON))
 
+	const maxConns, httpMemoryPerConn = 4, 2048
 	var router httphi.Router
-	cfg := httphi.DefaultRouterConfig(4, 2048, http.MaxPathValues())
-	err = router.Configure(&http, cfg)
+	cfg := httphi.DefaultRouterConfig(maxConns, httpMemoryPerConn, http.MaxPathValues())
+	err := router.Configure(&http, cfg)
 	failIfErr("Configuring httphi.Router", err)
 	defer router.Shutdown() // Despawns goroutines.
+
 	addr, err := link.Addr()
 	failIfErr("Esplink.Addr()", err)
 	print("Hosting webserver on http://", addr.String(), ":", port, "\n")
-	err = link.ListenAndServe(&router, port)
+
+	err = link.ListenAndServe(&router, port) // Blocks as long as Router can serve connections.
 	failIfErr("Esplink.ListenAndServe", err)
 	panic("unreachable")
 }
