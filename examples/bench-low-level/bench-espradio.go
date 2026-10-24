@@ -78,7 +78,7 @@ func main() {
 	// every SendOffsetEthFrame is refused before it reaches the blob.
 	println("connecting to", ssid, "...")
 	err = espradio.Connect(espradio.STAConfig{SSID: ssid, Password: password})
-	failIfErr("connecting to AP", err)
+	failIfErr("connecting to AP (ensure antenna connected)", err)
 
 	println("starting netdev...")
 	netdev, err := espradio.StartNetDev()

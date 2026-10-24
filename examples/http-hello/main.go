@@ -29,7 +29,7 @@ func main() {
 	netdev.UseNetdev(link)
 
 	println("Connecting to WiFi", ssid+"...")
-	failIfErr("connect", link.NetConnect(&nl.ConnectParams{
+	failIfErr("connect (ensure antenna connected)", link.NetConnect(&nl.ConnectParams{
 		Ssid:       ssid,
 		Passphrase: password,
 	}))

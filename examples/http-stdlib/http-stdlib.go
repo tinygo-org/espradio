@@ -26,7 +26,7 @@ func main() {
 		Passphrase: password,
 	})
 	if err != nil {
-		failure("connect failed: " + err.Error())
+		failure("connect failed (ensure antenna connected): " + err.Error())
 	}
 
 	println("Connected to WiFi.")
