@@ -25,76 +25,15 @@ import (
 	"unsafe"
 )
 
-// ─── Types ───────────────────────────────────────────────────────────────────
-
-type LogLevel uint8
-
-const (
-	LogLevelNone    = C.WIFI_LOG_NONE
-	LogLevelError   = C.WIFI_LOG_ERROR
-	LogLevelWarning = C.WIFI_LOG_WARNING
-	LogLevelInfo    = C.WIFI_LOG_INFO
-	LogLevelDebug   = C.WIFI_LOG_DEBUG
-	LogLevelVerbose = C.WIFI_LOG_VERBOSE
+// The LogLevel values in wifi.go must match wifi_log_level_t in esp_private/wifi.h.
+var (
+	_ [0]struct{} = [int(LogLevelNone) - int(C.WIFI_LOG_NONE)]struct{}{}
+	_ [0]struct{} = [int(LogLevelError) - int(C.WIFI_LOG_ERROR)]struct{}{}
+	_ [0]struct{} = [int(LogLevelWarning) - int(C.WIFI_LOG_WARNING)]struct{}{}
+	_ [0]struct{} = [int(LogLevelInfo) - int(C.WIFI_LOG_INFO)]struct{}{}
+	_ [0]struct{} = [int(LogLevelDebug) - int(C.WIFI_LOG_DEBUG)]struct{}{}
+	_ [0]struct{} = [int(LogLevelVerbose) - int(C.WIFI_LOG_VERBOSE)]struct{}{}
 )
-
-func (l LogLevel) String() string {
-	switch l {
-	case LogLevelNone:
-		return "NONE"
-	case LogLevelError:
-		return "ERROR"
-	case LogLevelWarning:
-		return "WARN"
-	case LogLevelInfo:
-		return "INFO"
-	case LogLevelDebug:
-		return "DEBUG"
-	case LogLevelVerbose:
-		return "VERBOSE"
-	default:
-		return "?"
-	}
-}
-
-// Config configures the radio and its driver.
-type Config struct {
-	Logging LogLevel
-	// ArenaPoolSize overrides the default per-target arena pool size (bytes).
-	// Zero means use the target default.
-	ArenaPoolSize int
-	// MaxTxPower caps the TX power in units of 0.25 dBm, range 8 to 84.
-	// Zero keeps the blob default. See SetMaxTxPower.
-	MaxTxPower int8
-}
-
-// AccessPoint represents a Wi-Fi access point discovered during scanning.
-type AccessPoint struct {
-	SSID string
-	RSSI int
-}
-
-// STAConfig configures station mode connection parameters.
-type STAConfig struct {
-	SSID     string
-	Password string
-}
-
-// ConnectResult represents the result of a connection attempt.
-type ConnectResult struct {
-	Connected bool
-	SSID      string
-	Channel   uint8
-	Reason    uint8
-}
-
-// APConfig configures soft-AP mode parameters.
-type APConfig struct {
-	SSID     string
-	Password string
-	Channel  uint8
-	AuthOpen bool
-}
 
 // ─── Enable ──────────────────────────────────────────────────────────────────
 
@@ -472,8 +411,7 @@ func kickSchedThrottled() {
 // be collected.  One large pool kept alive by this global is safe.
 var arenaPool []byte
 
-// ArenaStats returns the current arena usage and capacity in bytes.
-func ArenaStats() (used, capacity uint32) {
+func arenaStats() (used, capacity uint32) {
 	var u, c C.uint32_t
 	C.espradio_arena_stats(&u, &c)
 	return uint32(u), uint32(c)
@@ -505,14 +443,6 @@ const (
 
 var wifiEnabled uint32
 
-// ErrAlreadyEnabled is returned by Enable when the radio is already enabled.
-var ErrAlreadyEnabled = errors.New("espradio: radio already enabled")
-
-// ErrEnableFailed is returned by Enable when an earlier call to it failed.  That
-// failure is not recoverable in software: the driver has no teardown path, so the
-// device has to be reset before the radio can be brought up again.
-var ErrEnableFailed = errors.New("espradio: earlier Enable failed, reset required")
-
 // enableFailed marks the Enable state terminal on the way out.  Every error
 // return in Enable goes through it, so a caller that retries gets
 // ErrEnableFailed rather than the misleading ErrAlreadyEnabled.  A package-level
@@ -521,16 +451,6 @@ var ErrEnableFailed = errors.New("espradio: earlier Enable failed, reset require
 func enableFailed(err error) error {
 	atomic.StoreUint32(&wifiEnabled, wifiStateFailed)
 	return err
-}
-
-// Enable and configure the radio for WiFi.
-//
-// Enable is not idempotent and returns ErrAlreadyEnabled on a second call.  If an
-// earlier call failed, every later one returns ErrEnableFailed: a partially
-// initialised radio cannot be unwound, so the device must be reset.
-func Enable(config Config) (err error) {
-	onCore0(func() { err = enable(config) })
-	return
 }
 
 func enable(config Config) error {
@@ -597,16 +517,6 @@ func enable(config Config) error {
 	return nil
 }
 
-// Start starts the Wi-Fi driver and connects to the AP if in station mode.
-// Blocks until the driver is ready.  Start is separate from Enable to allow
-// configuration (e.g. country code) before starting, and to allow scanning without
-// starting the driver.  Start calls schedOnce in a loop to let the blob process
-// its internal startup sequence (posting events, etc.) before Start returns.
-func Start() (err error) {
-	onCore0(func() { err = start() })
-	return
-}
-
 func start() error {
 	var mode C.wifi_mode_t
 	if code := C.esp_wifi_get_mode(&mode); code != C.ESP_OK {
@@ -669,13 +579,6 @@ func postWiFiStart() {
 	C.espradio_netif_set_tx_enabled(1)
 }
 
-// Stop stops the Wi-Fi driver and powers down the radio.
-// It does nothing if the driver is not started.
-func Stop() (err error) {
-	onCore0(func() { err = stop() })
-	return
-}
-
 func stop() error {
 	if atomic.LoadUint32(&wifiStarted) == 0 {
 		return nil
@@ -700,156 +603,11 @@ func stop() error {
 	return nil
 }
 
-// DebugISRCount returns the number of WiFi ISR invocations (for debugging).
-func DebugISRCount() uint32 {
+func debugISRCount() uint32 {
 	return uint32(C.espradio_get_wifi_isr_count())
 }
 
-// Stats is a snapshot of the driver's internal counters.
-//
-// Most of these count something being silently discarded, so a non-zero value is
-// the only evidence that it happened.  A counter that stays zero is evidence
-// too: it can refute the reason it was added, which is the point.
-type Stats struct {
-	// Scheduler.
-	WiFiISRCount     uint32 // blob WiFi ISR invocations
-	SchedReentries   uint32 // schedOnce entered while another pass was in flight
-	EventCapHits     uint32 // event-loop drain used its whole budget
-	TimerCapHits     uint32 // ets_timer drain used its whole budget
-	ESPTimerCapHits  uint32 // esp_timer drain used its whole budget
-	YieldsSuppressed uint32 // safeGosched returned without yielding
-	// IntsOffNesting is wifiIntsOff as of this read.  Non-zero while the radio
-	// is idle means a blob critical section leaked.
-	IntsOffNesting uint32
-
-	// SchedPasses is completed schedOnce passes, and SchedPassesPerSec that count
-	// over elapsed time.  The nominal rate is 200 Hz; anything far above means the
-	// kickSched path is driving the ticker rather than the 5 ms timer.
-	SchedPasses       uint32
-	SchedPassesPerSec uint32
-
-	// Yield-driven scheduler wakes delivered and suppressed by the throttle, and
-	// the interval in force.  A large suppressed count against a modest
-	// SchedPassesPerSec is the throttle working.
-	KicksDelivered  uint32
-	KicksSuppressed uint32
-	KickThrottleUs  uint32
-
-	// HWISRCount is real hardware WiFi interrupts, and HWISRPerSec that over
-	// elapsed time.  Distinct from WiFiISRCount, which counts invocations of the
-	// blob ISR and so tracks scheduler passes on S3 and ESP32.
-	//
-	// A rate near SchedPassesPerSec on an idle radio means the interrupt is
-	// re-firing because something it is routed to is still asserting: the handler
-	// masks the line, the pass unmasks it, and a level-triggered source that
-	// nothing acked fires again at once.
-	HWISRCount  uint32
-	HWISRPerSec uint32
-
-	// WiFiISRSlots is the bitmask of ISR slots the blob registered, and
-	// WiFiISRHandlerCalls the total blob handler invocations.  The prewiring
-	// points several peripheral sources at one CPU interrupt, so fewer registered
-	// slots than routed sources means some source has no handler to ack it.
-	WiFiISRSlots        uint32
-	WiFiISRHandlerCalls uint32
-
-	// UnmaskIntervalUs is the minimum spacing between re-enables of the WiFi CPU
-	// interrupt, and UnmaskSuppressed how many passes ended without re-enabling
-	// it.  Zero interval means no limit; the ESP32-C3 reports zero because it does
-	// not need one.
-	UnmaskIntervalUs uint32
-	UnmaskSuppressed uint32
-
-	// WiFiISRInstalled is the bitmask of slots that actually hold a handler.
-	// Handlers arrive via ets_isr_attach, which writes only the handler table,
-	// while WiFiISRSlots is written only by set_intr -- and the dispatcher
-	// iterates WiFiISRSlots.  So a bit set here but not there is a handler that
-	// exists and is never called, leaving its source unacked.
-	WiFiISRInstalled uint32
-
-	// Bring-up pumps.  StartReadyAfterPass and ConnectReadyAfterPass are the pass
-	// on which the blob's ROM pointers became fully valid; 0 means the pump never
-	// ran, readyNeverSentinel that it ran and they never did.
-	StartReadyAfterPass   uint32
-	ConnectReadyAfterPass uint32
-
-	// RomPtrsSavedUnready counts save calls that could not latch every pointer.
-	// RomPtrsMissing is which ones are still unlatched, as ROM_PTR_* bits:
-	// 1 pTxRx, 2 our_tx_eb, 4 our_wait_eb, 8 lmacConfMib_ptr, 16 g_osi_funcs_p.
-	RomPtrsSavedUnready uint32
-	RomPtrsMissing      uint32
-
-	// Queues and the ISR ring.
-	ISRRingDrops    uint32 // ISR could not push: ring full
-	ISRRingSendFail uint32 // drained item dropped: destination queue full
-	QueueSendFull   uint32 // any queue send rejected because the queue was full
-
-	// RX path.
-	RxCallbacks uint32 // frames handed over by the blob
-	RxDrops     uint32 // frames dropped because the RX ring was full
-	RxOversize  uint32 // frames dropped because they exceeded the read buffer
-
-	// TX path.
-	TxAttempts     uint32 // frames handed to esp_wifi_internal_tx
-	TxFailNoMem    uint32 // rejected with ESP_ERR_NO_MEM (blob TX buffers gone)
-	TxFailOther    uint32 // rejected for any other reason
-	TxNotConnected uint32 // refused before the blob: STA not associated
-	// TxDoneCB counts TX-done callbacks, i.e. buffers the blob released.  It is
-	// not a per-frame acknowledgement: it also fires for frames the blob sends on
-	// its own, so it runs well ahead of TxAttempts.
-	TxDoneCB    uint32
-	TxRetries   uint32 // NO_MEM rejections retried rather than dropped
-	TxBusyWaits uint32 // senders that waited for another sender to finish
-
-	// Arena.  Shared by WiFi and the BT controller.
-	AllocCount    uint32 // tracked allocations
-	FreeCount     uint32 // tracked frees
-	ArenaUsed     uint32 // bytes
-	ArenaCapacity uint32 // bytes
-}
-
-// Print writes the counters with println, one group per line.  Uses println
-// rather than fmt to keep it usable from size-constrained builds, matching the
-// C-side dump helpers.
-func (s Stats) Print() {
-	println("espradio sched: isr", s.WiFiISRCount,
-		"reentry", s.SchedReentries,
-		"caphits ev/tmr/esptmr", s.EventCapHits, s.TimerCapHits, s.ESPTimerCapHits,
-		"yieldsupp", s.YieldsSuppressed,
-		"intsoff", s.IntsOffNesting)
-	println("espradio passes:", s.SchedPasses, "rate/s", s.SchedPassesPerSec,
-		"(nominal 200)")
-	println("espradio kicks: sent", s.KicksDelivered,
-		"suppressed", s.KicksSuppressed,
-		"throttle_us", s.KickThrottleUs)
-	println("espradio hwisr:", s.HWISRCount, "rate/s", s.HWISRPerSec,
-		"slots", s.WiFiISRSlots, "installed", s.WiFiISRInstalled,
-		"handlercalls", s.WiFiISRHandlerCalls)
-	println("espradio unmask: interval_us", s.UnmaskIntervalUs,
-		"suppressed", s.UnmaskSuppressed)
-	println("espradio bringup: startready", s.StartReadyAfterPass,
-		"connectready", s.ConnectReadyAfterPass,
-		"savedunready", s.RomPtrsSavedUnready,
-		"missing", s.RomPtrsMissing)
-	println("espradio queue: isrdrop", s.ISRRingDrops,
-		"isrsendfail", s.ISRRingSendFail,
-		"queuefull", s.QueueSendFull)
-	println("espradio rx: cb", s.RxCallbacks, "drop", s.RxDrops,
-		"oversize", s.RxOversize)
-	println("espradio tx: try", s.TxAttempts,
-		"nomem", s.TxFailNoMem,
-		"other", s.TxFailOther,
-		"notconn", s.TxNotConnected,
-		"done", s.TxDoneCB,
-		"retry", s.TxRetries,
-		"busywait", s.TxBusyWaits)
-	println("espradio mem: alloc", s.AllocCount,
-		"free", s.FreeCount,
-		"used", s.ArenaUsed, "of", s.ArenaCapacity)
-}
-
-// ReadStats fills s with a snapshot of the driver's internal counters.
-func ReadStats(s *Stats) {
+func readStats(s *Stats) {
 	s.WiFiISRCount = uint32(C.espradio_get_wifi_isr_count())
 	s.SchedReentries = atomic.LoadUint32(&schedReentries)
 	s.EventCapHits = atomic.LoadUint32(&schedEventCapHits)
@@ -905,7 +663,7 @@ func ReadStats(s *Stats) {
 	C.espradio_alloc_stats(&allocs, &frees)
 	s.AllocCount = uint32(allocs)
 	s.FreeCount = uint32(frees)
-	s.ArenaUsed, s.ArenaCapacity = ArenaStats()
+	s.ArenaUsed, s.ArenaCapacity = arenaStats()
 }
 
 // Scan tuning.  All three were unnamed literals; none has a recorded derivation.
@@ -916,12 +674,6 @@ const (
 	scanActiveMaxMs = 300
 	scanPassiveMs   = 500
 )
-
-// Scan performs a single Wi-Fi scan pass and returns the list of discovered access points.
-func Scan() (v []AccessPoint, err error) {
-	onCore0(func() { v, err = scan() })
-	return
-}
 
 func scan() ([]AccessPoint, error) {
 	C.espradio_ensure_osi_ptr()
@@ -1001,13 +753,6 @@ var (
 // by length, so no NUL and no C allocation is needed.
 func stringData(s string) *C.char {
 	return (*C.char)(unsafe.Pointer(unsafe.StringData(s)))
-}
-
-// Connect configures STA credentials and initiates association.
-// Blocks until CONNECTED, DISCONNECTED or timeout.
-func Connect(cfg STAConfig) (err error) {
-	onCore0(func() { err = connect(cfg) })
-	return
 }
 
 func connect(cfg STAConfig) error {
@@ -1113,26 +858,11 @@ func reportConnect(res ConnectResult) {
 	}
 }
 
-// Disconnect disconnects the station from its access point.
-func Disconnect() (err error) {
-	onCore0(func() { err = disconnect() })
-	return
-}
-
 func disconnect() error {
 	if code := C.esp_wifi_disconnect_internal(); code != C.ESP_OK {
 		return makeError(code)
 	}
 	return nil
-}
-
-// ErrNotConnected is returned when the station is not connected to an AP.
-var ErrNotConnected = errors.New("espradio: station not connected")
-
-// RSSI returns the signal strength in dBm of the AP the station is connected to.
-func RSSI() (v int, err error) {
-	onCore0(func() { v, err = rssi() })
-	return
 }
 
 func rssi() (int, error) {
@@ -1152,38 +882,7 @@ var (
 	linkEvents   chan ConnectResult
 )
 
-// SetLinkNotify sets a callback for station connects and disconnects that happen
-// outside a Connect call. The callback runs on its own goroutine.
-func SetLinkNotify(cb func(connected bool)) {
-	linkMu.Lock()
-	defer linkMu.Unlock()
-	linkNotifyCb = cb
-	if linkEvents != nil {
-		return
-	}
-	events := make(chan ConnectResult, 4)
-	go func() {
-		for res := range events {
-			linkMu.Lock()
-			cb := linkNotifyCb
-			linkMu.Unlock()
-			if cb != nil {
-				cb(res.Connected)
-			}
-		}
-	}()
-	connectMu.Lock()
-	linkEvents = events
-	connectMu.Unlock()
-}
-
 // ─── Soft-AP ─────────────────────────────────────────────────────────────────
-
-// StartAP starts the radio in soft-AP mode with the given configuration.
-func StartAP(cfg APConfig) (err error) {
-	onCore0(func() { err = startAP(cfg) })
-	return
-}
 
 func startAP(cfg APConfig) error {
 	if code := C.esp_wifi_set_mode(C.WIFI_MODE_AP); code != C.ESP_OK {
@@ -1215,26 +914,12 @@ func startAP(cfg APConfig) error {
 
 var maxTxPower int8
 
-// SetMaxTxPower sets the maximum TX power in units of 0.25 dBm. Wi-Fi must be started.
-// Range is 8 to 84, see esp_wifi_set_max_tx_power in esp-wifi/c/include/esp_wifi.h.
-func SetMaxTxPower(power int8) (err error) {
-	onCore0(func() { err = setMaxTxPower(power) })
-	return
-}
-
 func setMaxTxPower(power int8) error {
 	if code := C.esp_wifi_set_max_tx_power(C.int8_t(power)); code != C.ESP_OK {
 		return makeError(code)
 	}
 	maxTxPower = power
 	return nil
-}
-
-// MaxTxPower returns the maximum TX power in units of 0.25 dBm.
-// On ESP32 the blob can report less than was set for values above 56.
-func MaxTxPower() (v int8, err error) {
-	onCore0(func() { v, err = getMaxTxPower() })
-	return
 }
 
 func getMaxTxPower() (int8, error) {
@@ -1254,11 +939,6 @@ func applyMaxTxPower() error {
 
 // ─── RF diagnostics ─────────────────────────────────────────────────────────
 
-func SniffCountOnChannel(channel uint8, duration time.Duration) (v uint32, err error) {
-	onCore0(func() { v, err = sniffCountOnChannel(channel, duration) })
-	return
-}
-
 func sniffCountOnChannel(channel uint8, duration time.Duration) (uint32, error) {
 	if duration <= 0 {
 		duration = 1500 * time.Millisecond
@@ -1274,24 +954,11 @@ func sniffCountOnChannel(channel uint8, duration time.Duration) (uint32, error) 
 	return packets, nil
 }
 
-// SetChannel sets the Wi-Fi channel, 1 to 13. Use it after Start and before ESP-NOW,
-// so peers with Channel 0 send and receive there. See esp_wifi_set_channel in esp_wifi.h.
-func SetChannel(channel uint8) (err error) {
-	onCore0(func() { err = setChannel(channel) })
-	return
-}
-
 func setChannel(channel uint8) error {
 	if code := C.espradio_set_channel(C.uint8_t(channel)); code != C.ESP_OK {
 		return makeError(code)
 	}
 	return nil
-}
-
-// BeginMonitor enters promiscuous mode on channel (1 to 13). Do not scan or connect until EndMonitor.
-func BeginMonitor(channel uint8) (err error) {
-	onCore0(func() { err = beginMonitor(channel) })
-	return
 }
 
 func beginMonitor(channel uint8) error {
@@ -1301,29 +968,11 @@ func beginMonitor(channel uint8) error {
 	return nil
 }
 
-// StationMAC returns the 6-byte MAC of the station interface.
-func StationMAC() ([6]byte, error) {
-	mac, err := currentESPNowMAC(WiFiInterfaceSTA)
-	return [6]byte(mac), err
-}
-
-// EndMonitor leaves promiscuous mode. It does not restore the previous channel.
-func EndMonitor() (err error) {
-	onCore0(func() { err = endMonitor() })
-	return
-}
-
 func endMonitor() error {
 	if code := C.espradio_sniff_end(); code != C.ESP_OK {
 		return makeError(code)
 	}
 	return nil
-}
-
-// StartRawTXTracking registers the transmit-complete callback and zeroes the counters.
-func StartRawTXTracking() (err error) {
-	onCore0(func() { err = startRawTXTracking() })
-	return
 }
 
 func startRawTXTracking() error {
@@ -1333,23 +982,12 @@ func startRawTXTracking() error {
 	return nil
 }
 
-// RawFramesSent returns raw frames the MAC reported sent since the last
-// StartRawTXTracking call.
-func RawFramesSent() uint32 {
+func rawFramesSent() uint32 {
 	return uint32(C.espradio_raw_frames_sent())
 }
 
-// RawFramesFailed returns raw frames the MAC reported failed since the last
-// StartRawTXTracking call.
-func RawFramesFailed() uint32 {
+func rawFramesFailed() uint32 {
 	return uint32(C.espradio_raw_frames_failed())
-}
-
-// SendRawFrame queues a complete 802.11 MAC frame. Pass driverSeq true once
-// connected so the driver owns the sequence field, false to set it yourself.
-func SendRawFrame(frame []byte, driverSeq bool) (err error) {
-	onCore0(func() { err = sendRawFrame(frame, driverSeq) })
-	return
 }
 
 func sendRawFrame(frame []byte, driverSeq bool) error {

@@ -10,10 +10,7 @@ import (
 	"strconv"
 )
 
-// Error is an error from the radio stack.
-type Error C.esp_err_t
-
-func (e Error) Error() string {
+func (e Error) message() string {
 	switch {
 	case e >= C.ESP_ERR_MEMPROT_BASE:
 		return "espradio: memprot error " + strconv.FormatInt(int64(int32(e)), 10)
