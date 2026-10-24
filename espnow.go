@@ -18,59 +18,16 @@ import (
 	"unsafe"
 )
 
-const (
-	ESPNowAddressLength = C.ESP_NOW_ETH_ALEN
-	ESPNowKeyLength     = C.ESP_NOW_KEY_LEN
-	ESPNowMaxDataLength = C.ESP_NOW_MAX_DATA_LEN
+// The constants in espnow_api.go must match esp_now.h and esp_wifi_types_generic.h.
+var (
+	_ [0]struct{} = [ESPNowAddressLength - int(C.ESP_NOW_ETH_ALEN)]struct{}{}
+	_ [0]struct{} = [ESPNowKeyLength - int(C.ESP_NOW_KEY_LEN)]struct{}{}
+	_ [0]struct{} = [ESPNowMaxDataLength - int(C.ESP_NOW_MAX_DATA_LEN)]struct{}{}
+	_ [0]struct{} = [int(WiFiInterfaceSTA) - int(C.WIFI_IF_STA)]struct{}{}
+	_ [0]struct{} = [int(WiFiInterfaceAP) - int(C.WIFI_IF_AP)]struct{}{}
+	_ [0]struct{} = [int(ESPNowSendSuccess) - int(C.ESP_NOW_SEND_SUCCESS)]struct{}{}
+	_ [0]struct{} = [int(ESPNowSendFail) - int(C.ESP_NOW_SEND_FAIL)]struct{}{}
 )
-
-type WiFiInterface uint8
-
-const (
-	WiFiInterfaceSTA WiFiInterface = C.WIFI_IF_STA
-	WiFiInterfaceAP  WiFiInterface = C.WIFI_IF_AP
-)
-
-type ESPNowSendStatus uint8
-
-const (
-	ESPNowSendSuccess ESPNowSendStatus = C.ESP_NOW_SEND_SUCCESS
-	ESPNowSendFail    ESPNowSendStatus = C.ESP_NOW_SEND_FAIL
-)
-
-type ESPNowPeer struct {
-	Address [ESPNowAddressLength]byte
-	Key     [ESPNowKeyLength]byte
-	Channel uint8
-	If      WiFiInterface
-	Encrypt bool
-}
-
-type ESPNowPeerCount struct {
-	Total     int
-	Encrypted int
-}
-
-type ESPNowReceive struct {
-	SourceAddress      [ESPNowAddressLength]byte
-	DestinationAddress [ESPNowAddressLength]byte
-	RSSI               int8
-	Channel            uint8
-	SecondaryChannel   uint8
-	NoiseFloor         int8
-	Timestamp          uint32
-	// Data points into the radio's buffer and is only valid during the handler call.
-	Data []byte
-}
-
-type ESPNowSendReport struct {
-	DestinationAddress [ESPNowAddressLength]byte
-	SourceAddress      [ESPNowAddressLength]byte
-	If                 WiFiInterface
-	Rate               uint32
-	TxStatus           ESPNowSendStatus
-	Status             ESPNowSendStatus
-}
 
 var (
 	espNowMu            sync.RWMutex
@@ -78,12 +35,6 @@ var (
 	espNowSendHandler   func(ESPNowSendReport)
 	activeManagedESPNow *ESPNow
 )
-
-// ESPNowInit initializes the ESP-NOW subsystem and registers callback trampolines.
-func ESPNowInit() (err error) {
-	onCore0(func() { err = espNowInit() })
-	return
-}
 
 func espNowInit() error {
 	if code := C.esp_now_init(); code != C.ESP_OK {
@@ -101,12 +52,6 @@ func espNowInit() error {
 	return nil
 }
 
-// ESPNowDeinit deinitializes ESP-NOW and unregisters any callback trampolines.
-func ESPNowDeinit() (err error) {
-	onCore0(func() { err = espNowDeinit() })
-	return
-}
-
 func espNowDeinit() error {
 	if code := C.esp_now_unregister_recv_cb(); code != C.ESP_OK {
 		return makeError(code)
@@ -120,12 +65,6 @@ func espNowDeinit() error {
 	return nil
 }
 
-// ESPNowVersion returns the underlying ESP-NOW version reported by the SDK.
-func ESPNowVersion() (v uint32, err error) {
-	onCore0(func() { v, err = espNowVersion() })
-	return
-}
-
 func espNowVersion() (uint32, error) {
 	var version C.uint32_t
 	if code := C.esp_now_get_version(&version); code != C.ESP_OK {
@@ -134,38 +73,8 @@ func espNowVersion() (uint32, error) {
 	return uint32(version), nil
 }
 
-// ESPNowSetPrimaryMasterKey configures the 16-byte PMK used to encrypt LMKs.
-func ESPNowSetPrimaryMasterKey(key [ESPNowKeyLength]byte) (err error) {
-	onCore0(func() { err = espNowSetPrimaryMasterKey(key) })
-	return
-}
-
 func espNowSetPrimaryMasterKey(key [ESPNowKeyLength]byte) error {
 	return makeError(C.esp_now_set_pmk((*C.uint8_t)(unsafe.Pointer(&key[0]))))
-}
-
-// ESPNowSetReceiveHandler installs the Go callback for incoming ESP-NOW packets.
-// The handler must copy Data to keep it, so receiving does not allocate.
-func ESPNowSetReceiveHandler(handler func(ESPNowReceive)) {
-	espNowMu.Lock()
-	espNowRecvHandler = handler
-	espNowMu.Unlock()
-}
-
-// ESPNowSetSendHandler installs the Go callback for ESP-NOW send completion reports.
-func ESPNowSetSendHandler(handler func(ESPNowSendReport)) {
-	espNowMu.Lock()
-	espNowSendHandler = handler
-	espNowMu.Unlock()
-}
-
-// ESPNowSend sends a packet to one peer, or to all peers when peer is nil.
-// From a goroutine pinned with LockToCore0 it does not allocate.
-func ESPNowSend(peer *[ESPNowAddressLength]byte, data []byte) error {
-	if onCore0Direct() {
-		return espNowSend(peer, data)
-	}
-	return espNowSendOnCore0(peer, data)
 }
 
 // espNowSendOnCore0 keeps the closure out of ESPNowSend, since its captured values are allocated.
@@ -186,42 +95,18 @@ func espNowSend(peer *[ESPNowAddressLength]byte, data []byte) error {
 	return makeError(C.esp_now_send(peerPtr, dataPtr, C.size_t(len(data))))
 }
 
-// ESPNowAddPeer adds a peer to the SDK-maintained peer table.
-func ESPNowAddPeer(peer ESPNowPeer) (err error) {
-	onCore0(func() { err = espNowAddPeer(peer) })
-	return
-}
-
 func espNowAddPeer(peer ESPNowPeer) error {
 	cpeer := cESPNowPeer(peer)
 	return makeError(C.esp_now_add_peer(&cpeer))
-}
-
-// ESPNowDeletePeer removes a peer from the SDK-maintained peer table.
-func ESPNowDeletePeer(addr [ESPNowAddressLength]byte) (err error) {
-	onCore0(func() { err = espNowDeletePeer(addr) })
-	return
 }
 
 func espNowDeletePeer(addr [ESPNowAddressLength]byte) error {
 	return makeError(C.esp_now_del_peer((*C.uint8_t)(unsafe.Pointer(&addr[0]))))
 }
 
-// ESPNowModifyPeer updates an existing peer record.
-func ESPNowModifyPeer(peer ESPNowPeer) (err error) {
-	onCore0(func() { err = espNowModifyPeer(peer) })
-	return
-}
-
 func espNowModifyPeer(peer ESPNowPeer) error {
 	cpeer := cESPNowPeer(peer)
 	return makeError(C.esp_now_mod_peer(&cpeer))
-}
-
-// ESPNowGetPeer looks up a peer by MAC address.
-func ESPNowGetPeer(addr [ESPNowAddressLength]byte) (v ESPNowPeer, err error) {
-	onCore0(func() { v, err = espNowGetPeer(addr) })
-	return
 }
 
 func espNowGetPeer(addr [ESPNowAddressLength]byte) (ESPNowPeer, error) {
@@ -232,12 +117,6 @@ func espNowGetPeer(addr [ESPNowAddressLength]byte) (ESPNowPeer, error) {
 	return goESPNowPeer(cpeer), nil
 }
 
-// ESPNowFetchPeer fetches the next peer from the peer table.
-func ESPNowFetchPeer(fromHead bool) (v ESPNowPeer, err error) {
-	onCore0(func() { v, err = espNowFetchPeer(fromHead) })
-	return
-}
-
 func espNowFetchPeer(fromHead bool) (ESPNowPeer, error) {
 	var cpeer C.esp_now_peer_info_t
 	if code := C.espradio_esp_now_fetch_peer(C.int(boolToInt(fromHead)), &cpeer); code != C.ESP_OK {
@@ -246,20 +125,8 @@ func espNowFetchPeer(fromHead bool) (ESPNowPeer, error) {
 	return goESPNowPeer(cpeer), nil
 }
 
-// ESPNowPeerExists reports whether a peer exists in the peer table.
-func ESPNowPeerExists(addr [ESPNowAddressLength]byte) (v bool) {
-	onCore0(func() { v = espNowPeerExists(addr) })
-	return
-}
-
 func espNowPeerExists(addr [ESPNowAddressLength]byte) bool {
 	return bool(C.esp_now_is_peer_exist((*C.uint8_t)(unsafe.Pointer(&addr[0]))))
-}
-
-// ESPNowGetPeerCount returns the total and encrypted peer counts.
-func ESPNowGetPeerCount() (v ESPNowPeerCount, err error) {
-	onCore0(func() { v, err = espNowGetPeerCount() })
-	return
 }
 
 func espNowGetPeerCount() (ESPNowPeerCount, error) {
@@ -360,4 +227,13 @@ func espradio_on_esp_now_send(destAddr, srcAddr *C.uint8_t, ifidx C.wifi_interfa
 	if manager != nil {
 		manager.handleSend(report)
 	}
+}
+
+func currentESPNowMAC(iface WiFiInterface) (ESPNowAddr, error) {
+	var mac ESPNowAddr
+	code := C.esp_wifi_get_mac(C.wifi_interface_t(iface), (*C.uint8_t)(unsafe.Pointer(&mac[0])))
+	if code != C.ESP_OK {
+		return ESPNowAddr{}, makeError(code)
+	}
+	return mac, nil
 }

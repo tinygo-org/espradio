@@ -11,7 +11,10 @@ package espradio
 */
 import "C"
 
-import "runtime/interrupt"
+import (
+	"errors"
+	"runtime/interrupt"
+)
 
 // ticksPerSecond matches the real ESP32-C3 value used to convert timer ticks.
 const ticksPerSecond = 16_000_000
@@ -27,3 +30,8 @@ func initHardware() error { return nil }
 
 // wifiISRHandler is a no-op for QEMU: no real WiFi interrupts.
 func wifiISRHandler(interrupt.Interrupt) {}
+
+// QEMU has no BT controller.
+func bleInit() error { return errors.New("espradio: BLE not supported on QEMU") }
+
+func (t VHCITransport) write(buf []byte) (int, error) { return 0, nil }

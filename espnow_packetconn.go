@@ -1,17 +1,4 @@
-//go:build esp32c3 || esp32c3_qemu_target || esp32s3 || esp32
-
 package espradio
-
-/*
-#cgo CFLAGS: -Iblobs/include
-#cgo CFLAGS: -Iblobs/include/local
-#cgo CFLAGS: -DCONFIG_SOC_WIFI_NAN_SUPPORT=0
-#cgo CFLAGS: -DESPRADIO_PHY_PATCH_ROMFUNCS=0
-#cgo CFLAGS: -fno-short-enums
-
-#include "espradio.h"
-*/
-import "C"
 
 import (
 	"errors"
@@ -21,7 +8,6 @@ import (
 	"os"
 	"sync"
 	"time"
-	"unsafe"
 )
 
 const espNowPeerQueueDepth = 8
@@ -601,13 +587,4 @@ func parseESPNowAddr(addr net.Addr) (ESPNowAddr, error) {
 	default:
 		return ESPNowAddr{}, ErrESPNowAddrType
 	}
-}
-
-func currentESPNowMAC(iface WiFiInterface) (ESPNowAddr, error) {
-	var mac ESPNowAddr
-	code := C.esp_wifi_get_mac(C.wifi_interface_t(iface), (*C.uint8_t)(unsafe.Pointer(&mac[0])))
-	if code != C.ESP_OK {
-		return ESPNowAddr{}, makeError(code)
-	}
-	return mac, nil
 }
