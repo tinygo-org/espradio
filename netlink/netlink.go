@@ -160,7 +160,12 @@ func (n *Esplink) onLink(connected bool) (int, espradio.STAConfig) {
 	return 0, espradio.STAConfig{}
 }
 
-func (n *Esplink) StackGo() *xnet.StackGo       { return n.ns.StackGo() }
+// StackGo returns the underlying [xnet.StackGo] which can be used to
+// create [net.Conn] and [net.Listener] sockets for TCP and UDP.
+func (n *Esplink) StackGo() *xnet.StackGo { return n.ns.StackGo() }
+
+// StackAsync returns the underlying lneto stack for asynchronous use.
+// This stack is a low-level abstraction and is wrapped by [xnet.StackGo].
 func (n *Esplink) StackAsync() *xnet.StackAsync { return n.ns.StackAsync() }
 
 // NetDisconnect device from network

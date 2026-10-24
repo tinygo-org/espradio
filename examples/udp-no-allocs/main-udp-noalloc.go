@@ -1,13 +1,16 @@
-// This example connects with Esplink and starts sending UDP packets to a destination and prints UDP packets received.
+// This example connects with Esplink and listens to a destination and prints UDP packets received and responds to each once.
+// It needs setting of the IP which it wants to "target" or listen to:
 //
-//	tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=YourSSID -X main.password=YourPassword" -monitor ./examples/udp-no-allocs
+//	tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=YourSSID -X main.password=YourPassword -X main.target=192.168.1.xxx" -monitor ./examples/udp-no-allocs
 //
-// After flashing send a UDP packet and see what it answers:
+// After flashing read output to find out the ip address of esp32
+// and send a UDP packet and see what it answers:
 //
-//	echo hello | nc -u -p 7886 192.168.1.77 7885
+//	echo hello | nc -u -p 7886 [esp32 ipv4 i.e:192.168.1.2] 7885
 package main
 
 import (
+	"net/netip"
 	"time"
 	"unsafe"
 
@@ -22,9 +25,8 @@ import (
 var (
 	ssid     string
 	password string
+	target   string // set to IPv4 addr i.e: 192.168.1.2
 )
-
-var targetHost = [4]byte{192, 168, 1, 53}
 
 const (
 	targetPort = 7886
@@ -33,12 +35,18 @@ const (
 
 func main() {
 	time.Sleep(time.Second)
+	targetAddr, err := netip.ParseAddr(target)
+	if err != nil {
+		failure("parse target IP "+target, err)
+	} else if !targetAddr.Is4() {
+		failure("example setup for IPv4, got "+target, nil)
+	}
 	println("start")
 	link := link.Esplink{}
 	netdev.UseNetdev(&link)
 
 	println("connecting to", ssid, "...")
-	err := link.NetConnect(&nl.ConnectParams{
+	err = link.NetConnect(&nl.ConnectParams{
 		Ssid:       ssid,
 		Passphrase: password,
 	})
@@ -65,7 +73,8 @@ func main() {
 		failure("config udp", err)
 	}
 	println("dial UDP")
-	err = stack.DialUDP4(&c, localPort, targetHost, targetPort)
+
+	err = stack.DialUDP4(&c, localPort, targetAddr.As4(), targetPort)
 	if err != nil {
 		failure("dial udp", err)
 	}
@@ -79,7 +88,11 @@ func main() {
 		println("udp rx", n, ":", unsafe.String(&buf[0], n))
 		// write response:
 		n = copy(buf, "hello from esp32!")
-		c.Write(buf[:n])
+		_, err = c.Write(buf[:n])
+		if err != nil {
+			// Can happen if stack has not sent last packet and packet queue full.
+			println("udp write error:", err.Error())
+		}
 	}
 }
 
