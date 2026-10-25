@@ -80,7 +80,7 @@ func main() {
 		Password: password,
 	})
 	if err != nil {
-		failure("connect failed (ensure antenna connected): " + err.Error())
+		failure("connect failed: " + err.Error())
 	}
 	println("connected to", ssid, "!")
 

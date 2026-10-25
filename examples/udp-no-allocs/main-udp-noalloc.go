@@ -51,7 +51,7 @@ func main() {
 		Passphrase: password,
 	})
 	if err != nil {
-		failure("connect failed (ensure antenna connected)", err)
+		failure("connect failed", err)
 	}
 	stack := link.StackAsync()
 	println("connected as", string(ipv4.AppendFormatAddr(nil, stack.Addr4())), "port", localPort)

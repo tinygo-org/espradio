@@ -26,7 +26,7 @@ func main() {
 	time.Sleep(3 * time.Second)
 
 	if err := connectToWifi(); err != nil {
-		failure("WiFi connect failed (ensure antenna connected): " + err.Error())
+		failure("WiFi connect failed: " + err.Error())
 	}
 
 	clientId := "tinygo-client-" + randomString(10)
