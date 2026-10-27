@@ -42,6 +42,9 @@ type Config struct {
 	// ArenaPoolSize overrides the default per-target arena pool size (bytes).
 	// Zero means use the target default.
 	ArenaPoolSize int
+	// RxRingSize overrides the default per-target RX ring size (frames).
+	// Zero means use the target default. ESP32 is capped at 6.
+	RxRingSize int
 	// MaxTxPower caps the TX power in units of 0.25 dBm, range 8 to 84.
 	// Zero keeps the blob default. See SetMaxTxPower.
 	MaxTxPower int8

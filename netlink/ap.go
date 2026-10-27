@@ -71,6 +71,7 @@ func (n *Esplink) NetConnectAP(params APConnectParams) error {
 	err := espradio.Enable(espradio.Config{
 		Logging:       espradio.LogLevelError,
 		ArenaPoolSize: n.ArenaPoolSize,
+		RxRingSize:    n.RxRingSize,
 		MaxTxPower:    n.MaxTxPower,
 	})
 	if err != nil {

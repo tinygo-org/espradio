@@ -67,6 +67,9 @@ const ticksPerSecond = 16_000_000
 // S3 has 416KB SRAM1; larger arena pool for blob allocations.
 const arenaPoolSize = 48 * 1024
 
+// rxRingSize is the default RX ring size in frames.
+const rxRingSize = 16
+
 // ESP32-S3 (Xtensa): don't run the blob ISR from interrupt context — the deep
 // windowed call chains can overflow the interrupted goroutine's 8KB stack.
 // Just mask the level-triggered interrupt and wake the scheduler; schedOnce()

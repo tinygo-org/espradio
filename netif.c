@@ -284,7 +284,6 @@ void espradio_restore_rom_ptrs(void) {
 #endif
 }
 
-#define ESPRADIO_NETIF_RXRING_SIZE  6
 #define ESPRADIO_NETIF_FRAME_MAX   1600
 
 typedef struct {
@@ -292,19 +291,33 @@ typedef struct {
     uint16_t len;
 } espradio_rx_frame_t;
 
-/* On ESP32, place the RX ring in the dedicated DRAM1 region (SRAM1 pool 7/6)
+/* On ESP32, the RX ring lives in the dedicated DRAM1 region (SRAM1 pool 7/6)
  * to free ~9.6 KB of SRAM2 for the Go GC heap.  The linker script's .rxring
- * section sits before the arena in DRAM1.  On other targets the ring stays in
- * normal .bss. */
+ * section sits before the arena in DRAM1.  On other targets Go allocates the
+ * ring and passes it to espradio_netif_rx_ring_init. */
 #if CONFIG_IDF_TARGET_ESP32
-static espradio_rx_frame_t s_rx_ring[ESPRADIO_NETIF_RXRING_SIZE] __attribute__((section(".rxring")));
-#else
-static espradio_rx_frame_t s_rx_ring[ESPRADIO_NETIF_RXRING_SIZE];
+static espradio_rx_frame_t s_rx_ring_static[6] __attribute__((section(".rxring")));
+
+void *espradio_netif_rx_ring_static(void) { return s_rx_ring_static; }
+size_t espradio_netif_rx_ring_static_size(void) { return sizeof(s_rx_ring_static); }
 #endif
+
+static espradio_rx_frame_t *s_rx_ring;
+static uint32_t            s_rx_ring_size;
 static volatile uint32_t   s_rx_head;
 static volatile uint32_t   s_rx_tail;
 static volatile uint32_t   s_rx_cb_count;
 static volatile uint32_t   s_rx_cb_drop;
+
+size_t espradio_netif_rx_slot_size(void) { return sizeof(espradio_rx_frame_t); }
+
+/* Must run before the RX callback is registered. */
+void espradio_netif_rx_ring_init(void *buf, size_t len) {
+    s_rx_ring = (espradio_rx_frame_t *)buf;
+    s_rx_ring_size = len / sizeof(espradio_rx_frame_t);
+    s_rx_head = 0;
+    s_rx_tail = 0;
+}
 
 /* Producer side of the RX ring.  On ESP32-C3 this runs in real interrupt context
  * (the hardware handler calls the blob ISR directly), so the head is published
@@ -319,8 +332,8 @@ static volatile uint32_t   s_rx_cb_drop;
  * exact, are single-writer on each side and need no read-modify-write. */
 static esp_err_t espradio_sta_rxcb(void *buffer, uint16_t len, void *eb) {
     s_rx_cb_count++;
-    uint32_t next = (s_rx_head + 1) % ESPRADIO_NETIF_RXRING_SIZE;
-    if (next == s_rx_tail) {
+    uint32_t next = s_rx_ring_size ? (s_rx_head + 1) % s_rx_ring_size : 0;
+    if (s_rx_ring_size < 2 || next == s_rx_tail) {
         s_rx_cb_drop++;
         esp_wifi_internal_free_rx_buffer(eb);
         return 0;
@@ -387,13 +400,13 @@ uint16_t espradio_netif_rx_pop(void *dst, uint16_t dst_len) {
     if (len > dst_len) {
         s_rx_oversize++;
         ESPRADIO_MEMORY_BARRIER();
-        s_rx_tail = (s_rx_tail + 1) % ESPRADIO_NETIF_RXRING_SIZE;
+        s_rx_tail = (s_rx_tail + 1) % s_rx_ring_size;
         return 0;
     }
 
     memcpy(dst, s_rx_ring[s_rx_tail].data, len);
     ESPRADIO_MEMORY_BARRIER();
-    s_rx_tail = (s_rx_tail + 1) % ESPRADIO_NETIF_RXRING_SIZE;
+    s_rx_tail = (s_rx_tail + 1) % s_rx_ring_size;
     return len;
 }
 

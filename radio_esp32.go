@@ -52,6 +52,9 @@ const ticksPerSecond = 16_000_000
 // .bss), so it uses whatever space is left there.
 const arenaPoolSize = 48 * 1024
 
+// rxRingSize is the default RX ring size in frames.
+const rxRingSize = 6
+
 // Linker symbols bounding the dedicated arena region (remainder of DRAM1).
 //
 //go:extern _arena_start
@@ -70,6 +73,15 @@ func makeArenaPool(size int) []byte {
 		size = region
 	}
 	return unsafe.Slice((*byte)(unsafe.Pointer(&espradioArenaStart)), size)
+}
+
+// makeRxRing returns a slice over the .rxring region reserved in the linker
+// script, clamped to its size.
+func makeRxRing(size int) []byte {
+	if region := int(C.espradio_netif_rx_ring_static_size()); size > region {
+		size = region
+	}
+	return unsafe.Slice((*byte)(C.espradio_netif_rx_ring_static()), size)
 }
 
 // ESP32 (Xtensa): don't run the blob ISR from interrupt context — the deep

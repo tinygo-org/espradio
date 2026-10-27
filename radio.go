@@ -411,6 +411,9 @@ func kickSchedThrottled() {
 // be collected.  One large pool kept alive by this global is safe.
 var arenaPool []byte
 
+// rxRing keeps the RX ring backing memory reachable from Go.
+var rxRing []byte
+
 func arenaStats() (used, capacity uint32) {
 	var u, c C.uint32_t
 	C.espradio_arena_stats(&u, &c)
@@ -477,6 +480,15 @@ func enable(config Config) error {
 		}
 		arenaPool = makeArenaPool(poolSize)
 		C.espradio_arena_init((*C.uint8_t)(unsafe.Pointer(&arenaPool[0])), C.size_t(len(arenaPool)))
+	}
+
+	if rxRing == nil {
+		frames := rxRingSize
+		if config.RxRingSize > 0 {
+			frames = config.RxRingSize
+		}
+		rxRing = makeRxRing(max(frames, 2) * int(C.espradio_netif_rx_slot_size()))
+		C.espradio_netif_rx_ring_init(unsafe.Pointer(&rxRing[0]), C.size_t(len(rxRing)))
 	}
 
 	if !schedStarted {
