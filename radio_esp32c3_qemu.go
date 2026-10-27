@@ -25,6 +25,9 @@ const wifiCPUInterrupt = 1
 // arenaPoolSize matches the real C3 value.
 const arenaPoolSize = 32 * 1024
 
+// rxRingSize matches the real C3 value.
+const rxRingSize = 8
+
 // initHardware is a no-op for QEMU: no modem power / clock hardware present.
 func initHardware() error { return nil }
 

@@ -75,6 +75,9 @@ const ticksPerSecond = 16_000_000
 // C3 has only 321KB DRAM total, however 48KB is required for the arena pool for netlink.
 const arenaPoolSize = 48 * 1024
 
+// rxRingSize is the default RX ring size in frames.
+const rxRingSize = 8
+
 // ESP32-C3 (RISC-V): call the blob's WiFi ISR directly from the
 // hardware interrupt handler.  On RISC-V the interrupt context can
 // safely call the blob's ISR without stack overflow concerns.
