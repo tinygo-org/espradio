@@ -2,5 +2,5 @@ github.com/soypat/lneto v0.4.0 h1:oBTcMnhEIBERXmAfwK4uDpItRaF7RiT1K2pljFVxtQc=
 github.com/soypat/lneto v0.4.0/go.mod h1:Be5PjwoYukvHFiUXxpYi8+ppH2F/gw/vjGBvFdv+Ti8=
 github.com/soypat/natiu-mqtt v0.7.0 h1:94nWBMt2Pxu+8uEXvOIUXLp6hNWv5912D1qPH6wbGAg=
 github.com/soypat/natiu-mqtt v0.7.0/go.mod h1:xEta+cwop9izVCW7xOx2W+ct9PRMqr0gNVkvBPnQTc4=
-tinygo.org/x/drivers v0.36.0 h1:F0x342A6GWqh6abtCa57uAxCyz/b9MbGzvIVvIf+gpE=
-tinygo.org/x/drivers v0.36.0/go.mod h1:DQgKyHkB4G6IEOKVTAjApbKnWGwESN91EVJO+nMOE9Y=
+tinygo.org/x/drivers v0.37.0 h1:t2YPSYV+lEXwKYGvszHWmkMLLBp1dhcpfzsrcEwwf9Q=
+tinygo.org/x/drivers v0.37.0/go.mod h1:hi/x7sI5+PeNoRg/QbS21oxdsT7mcI3amFr+WvZmrzA=
