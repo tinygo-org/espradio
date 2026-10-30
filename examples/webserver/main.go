@@ -32,6 +32,8 @@ var maxTxPower int8 = 0
 const port uint16 = 80
 
 func main() {
+	initLED()
+
 	link := &link.Esplink{
 		MaxTxPower: maxTxPower,
 	}
