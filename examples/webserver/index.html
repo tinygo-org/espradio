@@ -3,42 +3,306 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TinyGo HTTP Server</title>
+<title>TinyGo Web Server</title>
 <style>
-body{font-family:Arial,sans-serif;background:#f4f4f4;margin:0;padding:20px;display:flex;justify-content:center;min-height:100vh}
-.c{text-align:center}h1{color:#333;margin:0 0 12px}p{color:#555;margin:6px 0}
-a{color:#07c;text-decoration:none}a:hover{text-decoration:underline}
-input,button{padding:6px;margin:4px}button{cursor:pointer}
-.links{list-style:none;padding:0;margin:12px 0}
-.links li{margin:4px 0}
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+
+    body {
+        background: #0a0a0b;
+        color: #f0f0f0;
+        font: 0.9rem/1.4 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+        -webkit-tap-highlight-color: transparent;
+    }
+
+    .card {
+        background: #1a1a1c;
+        border: 1px solid #4a4a4e;
+        border-radius: 18px;
+        padding: 20px;
+        width: 100%;
+        max-width: 340px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+    }
+
+    h1 {
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: #fff;
+        margin-bottom: 16px;
+    }
+
+    .pill {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        height: 52px;
+        padding: 0 12px;
+        margin-bottom: 10px;
+        background: #131315;
+        border: 1px solid #3a3a40;
+        border-radius: 12px;
+    }
+
+    .pill .label {
+        flex: 1;
+        color: #d0d0d6;
+        font-weight: 500;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .control {
+        flex-shrink: 0;
+        width: 52px;
+        height: 26px;
+        background: #26262a;
+        border: 1px solid #4a4a4e;
+        border-radius: 13px;
+        color: #f0f0f0;
+        font: 500 0.72rem/1 inherit;
+        cursor: pointer;
+        transition: background 0.15s, border-color 0.15s, transform 0.1s;
+    }
+
+    .control:hover { background: #34343a; border-color: #6a6a70; }
+    .control:active { transform: scale(0.96); background: #1f1f23; }
+
+    .switch {
+        position: relative;
+        flex-shrink: 0;
+        width: 52px;
+        height: 26px;
+    }
+
+    .switch input {
+        position: absolute;
+        opacity: 0;
+        width: 0;
+        height: 0;
+    }
+
+    .switch span {
+        position: absolute;
+        inset: 0;
+        background: #26262a;
+        border: 1px solid #4a4a4e;
+        border-radius: 13px;
+        cursor: pointer;
+        transition: background 0.2s, border-color 0.2s;
+    }
+
+    .switch span::before {
+        content: "";
+        position: absolute;
+        left: 3px;
+        top: 3px;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: #808088;
+        transition: transform 0.2s, background 0.2s;
+    }
+
+    .switch input:checked + span {
+        background: #3a3a40;
+        border-color: #6a6a70;
+    }
+
+    .switch input:checked + span::before {
+        transform: translateX(26px);
+        background: #f0f0f0;
+    }
+
+    .pill input {
+        flex: 1;
+        min-width: 0;
+        background: none;
+        border: 0;
+        color: #f0f0f0;
+        font: inherit;
+        outline: none;
+    }
+
+    .pill input::placeholder { color: #707078; }
+
+    .clear {
+        flex-shrink: 0;
+        width: 26px;
+        height: 26px;
+        padding: 0;
+        background: transparent;
+        border: 0;
+        border-radius: 50%;
+        color: #808088;
+        font: 500 1rem/1 system-ui, sans-serif;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        transition: color 0.15s, background 0.15s;
+    }
+
+    .clear:hover { color: #f0f0f0; background: #26262a; }
+    .clear:active { transform: scale(0.9); }
+    .clear[hidden] { display: none; }
+
+    .echo {
+        height: 1.4em;
+        font: 0.72rem/1.4 'Courier New', monospace;
+        color: #a0a0a8;
+        padding: 0 2px;
+        margin-bottom: 14px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .echo.err { color: #d09090; }
+
+    .footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        font: 0.72rem/1.4 'Courier New', monospace;
+        color: #808088;
+    }
+
+    .footer-left {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+    }
+
+    .footer a {
+        color: #c0c0c8;
+        text-decoration: none;
+        border-bottom: 1px solid #3a3a40;
+        flex-shrink: 0;
+    }
+
+    .footer a:hover { color: #fff; border-bottom-color: #6a6a70; }
+
+    .footer .random-link {
+        color: #c0c0c8;
+        cursor: pointer;
+        border-bottom: 1px solid #3a3a40;
+        flex-shrink: 0;
+    }
+
+    .footer .random-link:hover { color: #fff; border-bottom-color: #6a6a70; }
 </style>
 </head>
-<body><div class="c">
-<h1>TinyGo HTTP Server</h1>
-<ul class="links">
-<li><a href="/hello">/hello</a></li>
-<li><a href="/6">/6 (Tetris)</a></li>
-</ul>
+<body>
+    <div class="card">
+        <h1>TinyGo Web Server</h1>
 
-<p>LED</p>
-<button onclick="fetch('/on')">On</button>
-<button onclick="fetch('/off')">Off</button>
+        <div class="pill">
+            <span class="label">LED</span>
+            <label class="switch">
+                <input type="checkbox" id="ledSwitch">
+                <span></span>
+            </label>
+        </div>
 
-<p>cnt: <span id="cnt"></span></p>
-<button onclick="incrCnt()">+1</button>
-<form style="display:inline" onsubmit="setCnt();return false">
-<input type="text" name="cnt" placeholder="value">
-<button type="submit">Set</button>
-</form>
+        <div class="pill">
+            <input type="text" id="dataInput" placeholder="Say something...">
+            <button class="clear" id="clearBtn" title="Clear" hidden>×</button>
+            <button class="control" id="sendBtn">Send</button>
+        </div>
 
-<p style="margin-top:24px;color:#999;font-size:small">🌐 Powered by <a href="https://github.com/soypat/lneto">lneto</a></p>
-</div>
-<script>
-var counter=0;
-function fetchCnt(){fetch("/cnt").then(r=>r.json()).then(j=>{counter=j.cnt;cnt.innerHTML=counter})}
-function incrCnt(){counter++;fetch("/cnt?cnt="+counter,{method:"POST"}).then(r=>r.json()).then(j=>{counter=j.cnt;cnt.innerHTML=counter})}
-function setCnt(){var v=document.getElementsByName("cnt")[0].value;fetch("/cnt",{method:"POST",body:"cnt="+v,headers:{"Content-Type":"application/x-www-form-urlencoded"}}).then(r=>r.json()).then(j=>{counter=j.cnt;cnt.innerHTML=counter})}
-fetchCnt();
-</script>
+        <div class="echo" id="echoLine"></div>
+
+        <div class="footer">
+            <div class="footer-left">
+                <a href="/hello" target="_blank" rel="noopener">/hello</a>
+                <span class="random-link" id="randomBtn">/random</span>
+            </div>
+            <p>Powered by <a href="https://github.com/soypat/lneto">lneto</a></p>
+        </div>
+    </div>
+
+    <script>
+        const $ = id => document.getElementById(id);
+        const echo = $('echoLine');
+        const input = $('dataInput');
+        const clearBtn = $('clearBtn');
+
+        function say(text, err) {
+            echo.textContent = text;
+            echo.classList.toggle('err', !!err);
+        }
+
+        function syncClear() {
+            clearBtn.hidden = input.value.length === 0;
+        }
+
+        input.addEventListener('input', syncClear);
+
+        clearBtn.onclick = () => {
+            input.value = '';
+            syncClear();
+            input.focus();
+        };
+
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                input.value = '';
+                syncClear();
+            }
+        });
+
+        $('ledSwitch').onchange = async function() {
+            try {
+                await fetch(this.checked ? '/on' : '/off', { method: 'POST' });
+            } catch (e) {
+                say('led: error', true);
+            }
+        };
+
+        async function send() {
+            const value = input.value.trim();
+            if (!value) return input.focus();
+            try {
+                const res = await fetch('/msg', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain' },
+                    body: value
+                });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                say(await res.text());
+                input.value = '';
+                syncClear();
+                input.focus();
+            } catch (e) {
+                say('send: ' + e.message, true);
+            }
+        }
+
+        $('sendBtn').onclick = send;
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); send(); }
+        });
+
+        $('randomBtn').onclick = async () => {
+            try {
+                const res = await fetch('/random');
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                say('random: ' + (await res.text()).trim());
+            } catch (e) {
+                say('random: error', true);
+            }
+        };
+
+        syncClear();
+    </script>
 </body>
 </html>
