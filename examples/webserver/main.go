@@ -6,6 +6,7 @@ package main
 
 import (
 	_ "embed"
+	"errors"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -13,7 +14,6 @@ import (
 
 	"github.com/soypat/lneto/http/httphi"
 	"github.com/soypat/lneto/http/httpraw"
-	nl "tinygo.org/x/drivers/netlink"
 	link "tinygo.org/x/espradio/netlink"
 )
 
@@ -23,9 +23,18 @@ var indexHTML string
 //go:embed sixlines.html
 var sixlinesHTML string
 
+// Wi-Fi operating mode: "sta" for station mode or "ap" for access point mode.
+const wifiMode = "sta"
+
 var (
 	ssid     string // = "yourssid"
 	password string // = "yourpassword"
+)
+
+const (
+	apSsid    string = "tinygo-webserver"
+	apIP      string = "192.168.4.1"
+	apChannel uint8  = 6
 )
 
 // Limit TX power for stability. Valid range is 8-84; zero keeps the blob default.
@@ -34,23 +43,29 @@ var maxTxPower int8 = 0
 const port uint16 = 80
 
 var scratchPool sync.Pool // Stores []byte buffers to avoid allocations in HTTP handlers.
-
 const scratchSize = 128
 
 func main() {
-	// wait a bit for serial
-	time.Sleep(2 * time.Second)
-
 	link := &link.Esplink{
 		MaxTxPower: maxTxPower,
 	}
 
-	println("Connecting to WiFi", ssid+"...")
-	failIfErr("connect", link.NetConnect(&nl.ConnectParams{
-		Ssid:       ssid,
-		Passphrase: password,
-	}))
-	println("Connected to WiFi")
+	switch wifiMode {
+	case "sta":
+		if ssid != "" {
+			failIfErr("connect to STA", connectSTA(link))
+		} else {
+			println("SSID not set; creating an access point", apSsid)
+			failIfErr("create AP", createAP(link))
+		}
+	case "ap":
+		if ssid == "" {
+			ssid = apSsid
+		}
+		failIfErr("create AP", createAP(link))
+	default:
+		failIfErr("setup Wi-Fi", errors.New("unknown wifi mode: "+wifiMode))
+	}
 
 	scratchPool.New = func() interface{} { return make([]byte, scratchSize) }
 
