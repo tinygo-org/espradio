@@ -2,78 +2,98 @@ package main
 
 import (
 	_ "embed"
+	"math/rand"
 	"strconv"
-	"sync"
-	"sync/atomic"
 
 	"github.com/soypat/lneto/http/httphi"
-	"github.com/soypat/lneto/http/httpraw"
 )
 
 //go:embed index.html
 var indexHTML string
 
-//go:embed sixlines.html
-var sixlinesHTML string
+const textplain string = "text/plain; charset=UTF-8"
 
-var scratchPool sync.Pool // Stores []byte buffers to avoid allocations in HTTP handlers.
-const scratchSize = 128
-
-func logRequest(h httphi.HandlerFunc) httphi.HandlerFunc {
+func logRequest(handler httphi.HandlerFunc) httphi.HandlerFunc {
 	return func(exch *httphi.Exchange) {
-		println(exch.RequestMethod().String(), " ", exch.MuxPattern())
-		h(exch)
+		println("[HTTP]", exch.RequestMethod().String(), exch.MuxPattern())
+		handler(exch)
 	}
+}
+
+func requireMethod(exch *httphi.Exchange, method httphi.Method) bool {
+	if exch.RequestMethod() != method {
+		exch.RespondString(httphi.StatusMethodNotAllowed, textplain, "Method not allowed")
+		return false
+	}
+	return true
 }
 
 func root(exch *httphi.Exchange) {
-	exch.RespondString(httphi.StatusOK, "text/html", indexHTML)
+	if !requireMethod(exch, httphi.MethGet) {
+		return
+	}
+
+	exch.RespondString(httphi.StatusOK, "text/html; charset=utf-8", indexHTML)
 }
 
-func sixlines(exch *httphi.Exchange) {
-	exch.RespondString(httphi.StatusOK, "text/html", sixlinesHTML)
-}
+func on(exch *httphi.Exchange) {
+	if !requireMethod(exch, httphi.MethPost) {
+		return
+	}
 
-const textplain = "text/plain; charset=UTF-8"
-
-func LED_ON(exch *httphi.Exchange) {
 	setLED(true)
-	exch.RespondString(httphi.StatusOK, textplain, "led.High()")
+	exch.RespondString(httphi.StatusOK, textplain, "on")
 }
 
-func LED_OFF(exch *httphi.Exchange) {
+func off(exch *httphi.Exchange) {
+	if !requireMethod(exch, httphi.MethPost) {
+		return
+	}
+
 	setLED(false)
-	exch.RespondString(httphi.StatusOK, textplain, "led.Low()")
+	exch.RespondString(httphi.StatusOK, textplain, "off")
+}
+
+func msg(exch *httphi.Exchange) {
+	if !requireMethod(exch, httphi.MethPost) {
+		return
+	}
+
+	const maxBody = 256
+	var buf [maxBody]byte
+
+	cl := exch.RequestHeader("Content-Length")
+	if len(cl) > 0 {
+		n, err := strconv.Atoi(string(cl))
+		if err == nil && n > maxBody {
+			exch.RespondString(httphi.StatusRequestEntityTooLarge, textplain, "body too large")
+			return
+		}
+	}
+
+	n, err := exch.ReadBody(buf[:])
+	if err != nil {
+		exch.RespondString(httphi.StatusBadRequest, textplain, "read error")
+		return
+	}
+	println("[MSG]", string(buf[:n]))
+
+	exch.RespondString(httphi.StatusOK, textplain, "received")
 }
 
 func hello(exch *httphi.Exchange) {
-	exch.RespondString(httphi.StatusOK, textplain, "hello")
+	if !requireMethod(exch, httphi.MethGet) {
+		return
+	}
+
+	exch.RespondString(httphi.StatusOK, textplain, "Hello from TinyGo!")
 }
 
-var counter atomic.Int64
-
-func cnt(exch *httphi.Exchange) {
-	scratch := scratchPool.Get().([]byte)
-	defer scratchPool.Put(scratch)
-	switch exch.RequestMethod() {
-	case httphi.MethPost: // POST
-		var form httpraw.Form
-		form.Reset(scratch, 2) // 2 query values max.
-		const parseURL, prioritizeURL = true, false
-		err := exch.RequestParseForm(&form, parseURL, prioritizeURL)
-		if err != nil {
-			exch.Respond(httphi.StatusInternalServerError, "", nil)
-			return
-		}
-		c := form.Get("cnt")
-		if len(c) > 0 {
-			i64, _ := strconv.ParseInt(string(c), 0, 0)
-			counter.Store(i64)
-			println("set counter", i64)
-		}
+func random(exch *httphi.Exchange) {
+	if !requireMethod(exch, httphi.MethGet) {
+		return
 	}
-	json := append(scratch[:0], `{"cnt": `...)
-	json = strconv.AppendInt(json, counter.Load(), 10)
-	json = append(json, '}')
-	exch.Respond(httphi.StatusOK, "application/json", json)
+
+	n := rand.Int()
+	exch.RespondString(httphi.StatusOK, textplain, strconv.Itoa(n))
 }

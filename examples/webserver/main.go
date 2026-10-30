@@ -53,16 +53,14 @@ func main() {
 		failIfErr("setup Wi-Fi", errors.New("unknown wifi mode: "+wifiMode))
 	}
 
-	scratchPool.New = func() interface{} { return make([]byte, scratchSize) }
-
 	var http httphi.MuxSlice
 
 	http.Handle("/", logRequest(root))
+	http.Handle("/on", logRequest(on))
+	http.Handle("/off", logRequest(off))
+	http.Handle("/msg", logRequest(msg))
 	http.Handle("/hello", logRequest(hello))
-	http.Handle("/cnt", logRequest(cnt))
-	http.Handle("/6", logRequest(sixlines))
-	http.Handle("/off", logRequest(LED_OFF))
-	http.Handle("/on", logRequest(LED_ON))
+	http.Handle("/random", logRequest(random))
 
 	const maxConns, httpMemoryPerConn = 4, 2048
 	var router httphi.Router
