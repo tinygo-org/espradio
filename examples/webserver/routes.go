@@ -76,9 +76,9 @@ func msg(exch *httphi.Exchange) {
 		exch.RespondString(httphi.StatusBadRequest, textplain, "read error")
 		return
 	}
-	println("[MSG]", string(buf[:n]))
+	println("[MSG] ", string(buf[:n]))
 
-	exch.RespondString(httphi.StatusOK, textplain, "received")
+	exch.RespondString(httphi.StatusOK, textplain, "message: "+string(buf[:n]))
 }
 
 func hello(exch *httphi.Exchange) {

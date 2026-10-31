@@ -1,5 +1,5 @@
-// This example listens on port :80 serving a web page.  Multiple clients
-// may connect and be serviced at the same time.  IPv4 only.  HTTP only.
+// This example listens on port :80 serving a web page. Multiple clients
+// may connect and be serviced at the same time. IPv4 only. HTTP only.
 //
 // tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=YourSSID -X main.password=YourPassword" -monitor ./examples/webserver
 package main
@@ -16,8 +16,8 @@ import (
 const wifiMode = "sta"
 
 var (
-	ssid     string // = "yourssid"
-	password string // = "yourpassword"
+	ssid     string // = "YourSSID"
+	password string // = "YourPassword"
 )
 
 const (
@@ -43,7 +43,8 @@ func main() {
 		if ssid != "" {
 			failIfErr("connect to STA", connectSTA(link))
 		} else {
-			println("SSID not set; creating an access point", apSsid)
+			ssid = apSsid
+			println("[Wi-Fi] SSID not set; creating an access point", apSsid)
 			failIfErr("create AP", createAP(link))
 		}
 	case "ap":
@@ -73,7 +74,7 @@ func main() {
 
 	addr, err := link.Addr()
 	failIfErr("Esplink.Addr()", err)
-	print("Hosting webserver on http://", addr.String(), ":", port, "\n")
+	print("[HTTP] Hosting webserver on http://", addr.String(), ":", port, "\n")
 
 	err = link.ListenAndServe(&router, port) // Blocks as long as Router can serve connections.
 	failIfErr("Esplink.ListenAndServe", err)
