@@ -55,7 +55,7 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 	}
 
 	n.link.Config = espradio.Config{
-		Logging:       espradio.LogLevelError,
+		Logging:       n.Config.Logging,
 		ArenaPoolSize: n.Config.ArenaPoolSize,
 		RxRingSize:    n.Config.RxRingSize,
 		MaxTxPower:    n.Config.MaxTxPower,
