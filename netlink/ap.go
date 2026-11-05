@@ -68,12 +68,7 @@ func (n *Esplink) NetConnectAP(params APConnectParams) error {
 		println("Esplink NetConnectAP: ssid:", params.APConfig.SSID)
 	}
 
-	err := espradio.Enable(espradio.Config{
-		Logging:       n.Config.Logging,
-		ArenaPoolSize: n.Config.ArenaPoolSize,
-		RxRingSize:    n.Config.RxRingSize,
-		MaxTxPower:    n.Config.MaxTxPower,
-	})
+	err := espradio.Enable(n.Config)
 	if err != nil {
 		if debug {
 			println("could not enable radio:", err)

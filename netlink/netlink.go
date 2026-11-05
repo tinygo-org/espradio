@@ -54,12 +54,7 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 		println("Esplink NetConnect: ssid:", params.Ssid)
 	}
 
-	n.link.Config = espradio.Config{
-		Logging:       n.Config.Logging,
-		ArenaPoolSize: n.Config.ArenaPoolSize,
-		RxRingSize:    n.Config.RxRingSize,
-		MaxTxPower:    n.Config.MaxTxPower,
-	}
+	n.link.Config = n.Config
 	n.link.LinkNotify(n.onLink)
 	err := n.link.LinkConnect(espradio.STAConfig{
 		SSID:     params.Ssid,
