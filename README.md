@@ -25,47 +25,76 @@ On the `esp32` the Bluetooth controller needs 64 KB of RAM at a fixed address. T
 - Raw Ethernet frame send/receive
 - MQTT client support (uses [`natiu-mqtt`](https://github.com/soypat/natiu-mqtt))
 - QEMU target for running unit tests without hardware
-- Heapless HTTP/1.1 server that allocates nothing per request (uses [`httphi`](https://github.com/soypat/lneto/tree/main/http/httphi)). See the [http-hello](./examples/README.md#http-hello) and [webserver](./examples/README.md#webserver) examples.
-- `net/http` availability for compatibility with other projects. We strongly recommend using `httphi` instead of `net/http` for long running programs. See [examples README](./examples/README.md#http-stdlib).
+- Heapless HTTP/1.1 server that allocates nothing per request (uses [`httphi`](https://github.com/soypat/lneto/tree/main/http/httphi)). 
+  See the [http-hello](./examples/README.md#http-hello) and [webserver](./examples/README.md#webserver) examples.
+
+> [!IMPORTANT]
+> `net/http` is available for compatibility with other projects. 
+> We strongly recommend using `httphi` instead of `net/http` for long running programs. 
+> See [examples README](./examples/README.md#http-stdlib).
 
 ## Getting started with HTTP `hello` example
-We can start a basic HTTP webserver on the [Seeed Studio XIAO-ESP32C3](https://www.seeedstudio.com/Seeed-XIAO-ESP32C3-p-5431.html) using espradio along with the lightweight [`httphi`](https://github.com/soypat/lneto/tree/main/http/httphi) library using the code below. See [the example for all the code](./examples/http-hello/main.go):
+We can start a basic HTTP webserver using espradio along with the lightweight 
+[`httphi`](https://github.com/soypat/lneto/tree/main/http/httphi) library using the code below:
 
 ```go
+package main
+
+import (
+	"github.com/soypat/lneto/http/httphi"
+	"tinygo.org/x/drivers/netdev"
+	"tinygo.org/x/drivers/netlink"
+	link "tinygo.org/x/espradio/netlink"
+)
+
+var (
+	ssid     string
+	password string
+	port     uint16 = 80
+)
+
 func main() {
 	link := &link.Esplink{}
 	netdev.UseNetdev(link)
 
-	println("Connecting to WiFi", ssid+"...")
-	failIfErr("connect", link.NetConnect(&nl.ConnectParams{
+	print("Connecting to WiFi ", ssid, "...")
+	err := link.NetConnect(&netlink.ConnectParams{
 		Ssid:       ssid,
 		Passphrase: password,
-	}))
+	})
+	if err != nil {
+		println("Failed to connect:", err)
+		return
+	}
 	println("Connected to WiFi")
 
 	var http httphi.MuxSlice
 
-	// Routes are described here
 	http.Handle("/", func(exch *httphi.Exchange) {
 		exch.RespondString(httphi.StatusOK, "application/json", `{"message":"hello"}`)
 	})
 
 	var router httphi.Router
 	cfg := httphi.DefaultRouterConfig(4, 2048, http.MaxPathValues())
-	failIfErr("configuring Router", router.Configure(&http, cfg))
+	err := router.Configure(&http, cfg)
+	if err != nil {
+		println("Failed to configure router:", err)
+		return
+	}
 	defer router.Shutdown() // Despawns goroutines.
 
-	// Get IP address
 	addr, err := link.Addr()
-	failIfErr("Esplink.Addr()", err)
-	println("Hosting webserver on http://", addr.String(), ":", port)
+	if err != nil {
+		println("Failed to get IP address:", err)
+		return
+	}
+	print("Hosting webserver on http://", addr.String(), ":", port)
 
-	// Start web server (blocks indefinitely)
 	err = link.ListenAndServe(&router, port)
-	failIfErr("Esplink.ListenAndServe", err)
-
-	// `select {}` prevents the program from terminating
-	select {}
+	if err != nil {
+		println("Failed to start the HTTP server:", err)
+		return
+	}
 }
 ```
 
@@ -75,8 +104,14 @@ Upload your program to the ESP32 using TinyGo as follows. You'll need to change 
 	- `-target xiao-esp32c3` for C3
 	- `-target xiao-esp32s3` for S3
 
+Let's assume you have xiao-esp32s3.
+
+```bash
+tinygo flash -target xiao-esp32s3 -ldflags="-X main.ssid=yourssid -X main.password=yourpassword" -size short -monitor ./examples/http-hello
 ```
-$ tinygo flash -target xiao-esp32x3 -ldflags="-X main.ssid=yourssid -X main.password=yourpassword" -size short -monitor ./examples/http-hello
+
+The output will be something like this:
+```
    code    data     bss |   flash     ram
  860073   33552  345392 |  893625  378944
 Connecting to /dev/ttyACM0...
