@@ -37,14 +37,7 @@ type Esplink struct {
 	started  bool
 	link     espradio.Link
 
-	// ArenaPoolSize overrides the default arena pool size (bytes). Zero uses target default.
-	ArenaPoolSize int
-
-	// RxRingSize overrides the default RX ring size (frames). Zero uses target default.
-	RxRingSize int
-
-	// MaxTxPower caps the TX power in units of 0.25 dBm, range 8 to 84. Zero keeps the blob default.
-	MaxTxPower int8
+	Config espradio.Config
 }
 
 func (n *Esplink) rstack() xnet.StackRetrying {
@@ -61,12 +54,7 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 		println("Esplink NetConnect: ssid:", params.Ssid)
 	}
 
-	n.link.Config = espradio.Config{
-		Logging:       espradio.LogLevelError,
-		ArenaPoolSize: n.ArenaPoolSize,
-		RxRingSize:    n.RxRingSize,
-		MaxTxPower:    n.MaxTxPower,
-	}
+	n.link.Config = n.Config
 	n.link.LinkNotify(n.onLink)
 	err := n.link.LinkConnect(espradio.STAConfig{
 		SSID:     params.Ssid,
