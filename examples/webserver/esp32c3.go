@@ -2,6 +2,8 @@
 
 package main
 
-func setLED(lightOn bool) {
-	// do nothing because the Xiao ESP32-C3 doesn't have an onboard LED.
-}
+// do nothing because the Xiao ESP32-C3 doesn't have an onboard LED.
+
+func initLED() {}
+
+func setLED(lightOn bool) {}

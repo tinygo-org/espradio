@@ -6,8 +6,9 @@ import (
 	"machine"
 )
 
-func init() {
+func initLED() {
 	machine.LED.Configure(machine.PinConfig{Mode: machine.PinOutput})
+	machine.LED.Set(false)
 }
 
 func setLED(lightOn bool) {
