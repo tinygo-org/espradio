@@ -45,6 +45,38 @@ type Esplink struct {
 
 	// MaxTxPower caps the TX power in units of 0.25 dBm, range 8 to 84. Zero keeps the blob default.
 	MaxTxPower int8
+
+	// TCP overrides the TCP buffer and pool sizes. Zero fields keep the defaults.
+	TCP TCPConfig
+}
+
+// TCPConfig sizes the TCP connections of the stack.
+type TCPConfig struct {
+	// PoolSize is the number of connections a listener can hold at once.
+	PoolSize uint16
+	// QueueSize is the number of sent but unacknowledged segments per connection.
+	QueueSize int
+	// TxBufSize and RxBufSize are the send and receive buffers of every
+	// connection, dialed or accepted, in bytes.
+	TxBufSize int
+	RxBufSize int
+}
+
+// apply returns def with the nonzero fields of c.
+func (c TCPConfig) apply(def xnet.TCPPoolConfig) xnet.TCPPoolConfig {
+	if c.PoolSize > 0 {
+		def.PoolSize = c.PoolSize
+	}
+	if c.QueueSize > 0 {
+		def.QueueSize = c.QueueSize
+	}
+	if c.TxBufSize > 0 {
+		def.TxBufSize = c.TxBufSize
+	}
+	if c.RxBufSize > 0 {
+		def.RxBufSize = c.RxBufSize
+	}
+	return def
 }
 
 func (n *Esplink) rstack() xnet.StackRetrying {
@@ -91,7 +123,7 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 		MaxActiveUDPPorts: 2,
 		MaxActiveTCPPorts: 1,
 		PassivePeers:      64,
-	}, xnet.TCPPoolConfig{
+	}, n.TCP.apply(xnet.TCPPoolConfig{
 		PoolSize:           4,
 		QueueSize:          4,
 		TxBufSize:          4096,
@@ -99,7 +131,7 @@ func (n *Esplink) NetConnect(params *nl.ConnectParams) error {
 		EstablishedTimeout: 2 * time.Second,
 		ClosingTimeout:     2 * time.Second,
 		NewBackoff:         func() lneto.BackoffStrategy { return pollBackoff },
-	})
+	}))
 	if err != nil {
 		if debug {
 			println("stack failed:", err)

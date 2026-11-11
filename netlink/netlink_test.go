@@ -4,6 +4,7 @@ import (
 	"net/netip"
 	"testing"
 
+	"github.com/soypat/lneto/x/xnet"
 	nl "tinygo.org/x/drivers/netlink"
 	"tinygo.org/x/espradio"
 )
@@ -134,5 +135,16 @@ func TestAPParamsWithDefaultsDHCPSubnet(t *testing.T) {
 	got = APConnectParams{StaticAddr: netip.MustParseAddr("10.0.0.1")}.withDefaults()
 	if want := netip.MustParsePrefix("10.0.0.0/24"); got.DHCPSubnet != want {
 		t.Errorf("DHCPSubnet = %v; want %v", got.DHCPSubnet, want)
+	}
+}
+
+func TestTCPConfigApply(t *testing.T) {
+	def := xnet.TCPPoolConfig{PoolSize: 4, QueueSize: 4, TxBufSize: 4096, RxBufSize: 1024}
+	if got := (TCPConfig{}).apply(def); got.PoolSize != 4 || got.QueueSize != 4 || got.TxBufSize != 4096 || got.RxBufSize != 1024 {
+		t.Errorf("zero TCPConfig changed defaults: %+v", got)
+	}
+	got := TCPConfig{PoolSize: 1, TxBufSize: 2048}.apply(def)
+	if got.PoolSize != 1 || got.QueueSize != 4 || got.TxBufSize != 2048 || got.RxBufSize != 1024 {
+		t.Errorf("partial TCPConfig: %+v", got)
 	}
 }

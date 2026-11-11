@@ -114,7 +114,7 @@ func (n *Esplink) NetConnectAP(params APConnectParams) error {
 		MaxActiveTCPPorts:   uint16(params.MaxTCPPorts),
 		PassivePeers:        params.PassivePeers,
 		AcceptIPv4Broadcast: true,
-	}, xnet.TCPPoolConfig{
+	}, n.TCP.apply(xnet.TCPPoolConfig{
 		PoolSize:           2,
 		QueueSize:          4,
 		TxBufSize:          4096,
@@ -122,7 +122,7 @@ func (n *Esplink) NetConnectAP(params APConnectParams) error {
 		EstablishedTimeout: 10 * time.Second,
 		ClosingTimeout:     5 * time.Second,
 		NewBackoff:         func() lneto.BackoffStrategy { return pollBackoff },
-	})
+	}))
 	if err != nil {
 		if debug {
 			println("stack failed:", err)
