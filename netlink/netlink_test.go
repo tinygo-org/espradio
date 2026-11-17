@@ -4,6 +4,7 @@ import (
 	"net/netip"
 	"testing"
 
+	"github.com/hybridgroup/tls13"
 	"github.com/soypat/lneto/x/xnet"
 	nl "tinygo.org/x/drivers/netlink"
 	"tinygo.org/x/espradio"
@@ -146,5 +147,36 @@ func TestTCPConfigApply(t *testing.T) {
 	got := TCPConfig{PoolSize: 1, TxBufSize: 2048}.apply(def)
 	if got.PoolSize != 1 || got.QueueSize != 4 || got.TxBufSize != 2048 || got.RxBufSize != 1024 {
 		t.Errorf("partial TCPConfig: %+v", got)
+	}
+}
+
+func TestTLSSocketWithoutConfig(t *testing.T) {
+	var e Esplink
+	_, err := e.Socket(xnet.AF_INET, xnet.SOCK_STREAM, ipprotoTLS)
+	if err != errNoTLSConfig {
+		t.Errorf("Socket(IPPROTO_TLS) without TLS config = %v; want errNoTLSConfig", err)
+	}
+}
+
+func TestTLSSocketBusy(t *testing.T) {
+	var e Esplink
+	UseTLS(&e, &tls13.Config{})
+	e.berkeley = *xnet.NewBerkeleyStack(e.ns.StackGo().Socket)
+	fd, err := e.Socket(xnet.AF_INET, xnet.SOCK_STREAM, ipprotoTLS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !e.isTLS(fd) {
+		t.Errorf("isTLS(%d) = false; want true", fd)
+	}
+	if _, err = e.Socket(xnet.AF_INET, xnet.SOCK_STREAM, ipprotoTLS); err != errTLSBusy {
+		t.Errorf("second Socket(IPPROTO_TLS) = %v; want errTLSBusy", err)
+	}
+	e.Close(fd)
+	if e.isTLS(fd) {
+		t.Errorf("isTLS(%d) after Close = true; want false", fd)
+	}
+	if _, err = e.Socket(xnet.AF_INET, xnet.SOCK_STREAM, ipprotoTLS); err != nil {
+		t.Errorf("Socket(IPPROTO_TLS) after Close = %v; want nil", err)
 	}
 }
