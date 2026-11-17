@@ -1,8 +1,10 @@
 package netlink
 
 import (
+	"io"
 	"net/netip"
 	"testing"
+	"time"
 
 	"github.com/hybridgroup/tls13"
 	"github.com/soypat/lneto/x/xnet"
@@ -178,5 +180,38 @@ func TestTLSSocketBusy(t *testing.T) {
 	}
 	if _, err = e.Socket(xnet.AF_INET, xnet.SOCK_STREAM, ipprotoTLS); err != nil {
 		t.Errorf("Socket(IPPROTO_TLS) after Close = %v; want nil", err)
+	}
+}
+
+type fakeTLSConn struct {
+	s        *tlsSocket
+	deadline time.Time
+}
+
+func (f *fakeTLSConn) Configure(tls13.Config) error { return nil }
+func (f *fakeTLSConn) Open(io.ReadWriter) error     { return nil }
+func (f *fakeTLSConn) Handshake() error             { f.deadline = f.s.deadline; return nil }
+func (f *fakeTLSConn) Read(b []byte) (int, error)   { return 0, nil }
+func (f *fakeTLSConn) Write(b []byte) (int, error)  { return len(b), nil }
+func (f *fakeTLSConn) Close() error                 { return nil }
+
+func TestTLSHandshakeTimeout(t *testing.T) {
+	var e Esplink
+	UseTLS(&e, &tls13.Config{})
+	fake := &fakeTLSConn{s: &e.tls}
+	e.tls.conn = fake
+	if err := e.tlsHandshake("example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if !fake.deadline.IsZero() {
+		t.Errorf("deadline without timeout = %v; want zero", fake.deadline)
+	}
+	e.TLSHandshakeTimeout = 5 * time.Second
+	before := time.Now()
+	if err := e.tlsHandshake("example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if d := fake.deadline.Sub(before); d < 5*time.Second || d > 6*time.Second {
+		t.Errorf("deadline = now + %v; want about 5s", d)
 	}
 }

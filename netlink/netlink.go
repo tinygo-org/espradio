@@ -52,6 +52,9 @@ type Esplink struct {
 	// TCP overrides the TCP buffer and pool sizes. Zero fields keep the defaults.
 	TCP TCPConfig
 
+	// TLSHandshakeTimeout bounds the TLS handshake. Zero means no timeout.
+	TLSHandshakeTimeout time.Duration
+
 	tls tlsSocket
 }
 

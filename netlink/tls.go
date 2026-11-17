@@ -65,6 +65,9 @@ func (n *Esplink) tlsHandshake(host string) error {
 	cfg := *n.tls.cfg
 	cfg.ServerName = host
 	n.tls.deadline = time.Time{}
+	if n.TLSHandshakeTimeout > 0 {
+		n.tls.deadline = time.Now().Add(n.TLSHandshakeTimeout)
+	}
 	if err := n.tls.conn.Configure(cfg); err != nil {
 		return err
 	}

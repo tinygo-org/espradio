@@ -56,7 +56,10 @@ func main() {
 		failure("verifier: " + err.Error())
 	}
 
-	link := netlink.Esplink{TCP: netlink.TCPConfig{PoolSize: 1}}
+	link := netlink.Esplink{
+		TCP:                 netlink.TCPConfig{PoolSize: 1},
+		TLSHandshakeTimeout: 30 * time.Second,
+	}
 	netlink.UseTLS(&link, &tls13.Config{
 		Rand:         rand.Reader,
 		Verifier:     &verifier,
