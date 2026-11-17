@@ -10,4 +10,4 @@ require (
 	tinygo.org/x/drivers v0.37.0
 )
 
-replace github.com/soypat/lcrypto => github.com/hybridgroup/lcrypto v0.0.0-20261117094551-b9156fb9788e
+replace github.com/soypat/lcrypto => github.com/hybridgroup/lcrypto v0.0.0-20261117132347-27213a137c8e

@@ -1,5 +1,5 @@
-github.com/hybridgroup/lcrypto v0.0.0-20261117094551-b9156fb9788e h1:8GM6daKwsEFtTYiZUmT6vDmnoP9j6WZA1V5/zFDTKBQ=
-github.com/hybridgroup/lcrypto v0.0.0-20261117094551-b9156fb9788e/go.mod h1:6PDwW2aJ6WPo3gr7UQEMCoIHiPj92Zn+9beCJL1jn/k=
+github.com/hybridgroup/lcrypto v0.0.0-20261117132347-27213a137c8e h1:K9u2Wh6czQ2W7Czmxji+H2uOkdSLwg6opWWAoSi7v/s=
+github.com/hybridgroup/lcrypto v0.0.0-20261117132347-27213a137c8e/go.mod h1:6PDwW2aJ6WPo3gr7UQEMCoIHiPj92Zn+9beCJL1jn/k=
 github.com/hybridgroup/tls13 v0.0.0-20261117102252-0c851989a2d3 h1:2VzYV5x1nQtWc3vjE+fmOUS1iDK+B8SghBe/cVmg5ns=
 github.com/hybridgroup/tls13 v0.0.0-20261117102252-0c851989a2d3/go.mod h1:G8nYBzRosnu7ffAWpibPcTUqbioYWCkZIT6Ja/6xxA0=
 github.com/soypat/lneto v0.4.1-0.20261111162121-94d0932e7b53 h1:g+47gTH6v/zh7/sWEXN+HKn4Wa7vQ6Acp7Ih6BN5Ioo=
