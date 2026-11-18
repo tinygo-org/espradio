@@ -8,7 +8,7 @@ package espradio
 #cgo CFLAGS: -Iblobs/include/local
 #cgo CFLAGS: -DCONFIG_SOC_WIFI_NAN_SUPPORT=0
 #cgo CFLAGS: -DESPRADIO_PHY_PATCH_ROMFUNCS=0
-#cgo LDFLAGS: -Lblobs/libs/esp32c6 -lcoexist -lcore -lmesh -lnet80211 -lespnow -lregulatory -lphy -lpp -lwpa_supplicant
+#cgo LDFLAGS: -Lblobs/libs/esp32c6 -lcoexist -lcore -lmesh -lnet80211 -lespnow -lregulatory -lphy -lpp -lwpa_supplicant -lble_app -lbtbb
 
 #include "espradio.h"
 */
@@ -16,7 +16,6 @@ import "C"
 
 import (
 	"device/esp"
-	"errors"
 	"runtime/interrupt"
 
 	_ "tinygo.org/x/espradio/esp32c6"
@@ -54,8 +53,23 @@ func wifiISRHandler(interrupt.Interrupt) {
 	kickSched()
 }
 
-var errNoBLE = errors.New("espradio: BLE is not supported on the ESP32-C6")
+// CPU interrupt numbers for BT, must match bt_ble_esp32c6.c.
+const (
+	btCPUIntMAC   = 28
+	btCPUIntTimer = 30
+)
 
-func bleInit() error { return errNoBLE }
+func setupBTInterrupts() {
+	interrupt.New(btCPUIntMAC, btMACHandler).Enable()
+	interrupt.New(btCPUIntTimer, btTimerHandler).Enable()
+}
 
-func (t VHCITransport) write(buf []byte) (int, error) { return 0, errNoBLE }
+func btMACHandler(interrupt.Interrupt) {
+	C.espradio_bt_isr_dispatch_mac()
+	kickSched()
+}
+
+func btTimerHandler(interrupt.Interrupt) {
+	C.espradio_bt_isr_dispatch_timer()
+	kickSched()
+}

@@ -1895,3 +1895,14 @@ wifi_osi_funcs_t espradio_osi_funcs = {
     ._coex_schm_get_phase_by_idx = espradio_coex_schm_get_phase_by_idx,
     ._magic = ESP_WIFI_OS_ADAPTER_MAGIC,
 };
+
+/* Timer access for the ESP32-C6 BLE porting layer in bt_ble_esp32c6.c. */
+void espradio_timer_setfn_ext(void *ptimer, void *fn, void *arg) { espradio_timer_setfn(ptimer, fn, arg); }
+void espradio_timer_arm_ext(void *ptimer, uint32_t ms, bool repeat) { espradio_timer_arm(ptimer, ms, repeat); }
+void espradio_timer_disarm_ext(void *ptimer) { espradio_timer_disarm(ptimer); }
+void espradio_timer_done_ext(void *ptimer) { espradio_timer_done(ptimer); }
+
+bool espradio_timer_is_active_ext(void *ptimer) {
+    int i = timer_slot_find(ptimer);
+    return i >= 0 && timer_slots[i].active;
+}
