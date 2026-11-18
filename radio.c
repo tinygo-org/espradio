@@ -85,10 +85,11 @@ static void espradio_bt_irq_stub(void *arg) {
 }
 
 static void espradio_bt_irq_prewire(void) {
-#ifdef __XTENSA__
-    /* CPU lines 28 to 30 are not BT lines on Xtensa. BLE init routes BT to 13 and 17. */
+#if defined(__XTENSA__) || CONFIG_IDF_TARGET_ESP32C6
+    /* CPU lines 28 to 30 are not BT lines on Xtensa. BLE init routes BT to 13 and 17.
+     * The C6 has no BLE support here and no RWBT/RWBLE sources. */
     return;
-#endif
+#else
     if (s_bt_irq_wired) {
         return;
     }
@@ -109,6 +110,7 @@ static void espradio_bt_irq_prewire(void) {
     ets_isr_attach(ESPRADIO_RWBLE_INUM, espradio_bt_irq_stub, NULL);
 
     ets_isr_unmask((1u << ESPRADIO_BTBB_INUM) | (1u << ESPRADIO_RWBT_INUM) | (1u << ESPRADIO_RWBLE_INUM));
+#endif
 }
 
 void espradio_rom_hooks_init(void) {
@@ -183,6 +185,9 @@ static void espradio_disable_all_wdt(void) {
         *(volatile uint32_t *)(timg_base[i] + 0x64) = 0;           /* re-lock */
     }
 
+#elif CONFIG_IDF_TARGET_ESP32C6
+    /* The C3 RTC_CNTL addresses are TIMG0 on the C6, and the TinyGo runtime
+     * already disables the C6 watchdogs. */
 #else /* RISC-V (ESP32-C3) — different RTC_CNTL offsets, same TIMG offsets */
 
     /* --- Clock glitch detector --- */

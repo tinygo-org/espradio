@@ -1,4 +1,4 @@
-//go:build esp32c3 || esp32c3_qemu_target || esp32s3 || esp32
+//go:build esp32c3 || esp32c3_qemu_target || esp32c6 || esp32s3 || esp32
 
 package espradio
 

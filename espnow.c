@@ -15,7 +15,11 @@ static void espradio_esp_now_recv_cb(const esp_now_recv_info_t *info, const uint
         if (info->rx_ctrl != NULL) {
             rssi = info->rx_ctrl->rssi;
             channel = info->rx_ctrl->channel;
+#if CONFIG_SOC_WIFI_HE_SUPPORT
+            secondary_channel = info->rx_ctrl->second;
+#else
             secondary_channel = info->rx_ctrl->secondary_channel;
+#endif
             noise_floor = info->rx_ctrl->noise_floor;
             timestamp = info->rx_ctrl->timestamp;
         }

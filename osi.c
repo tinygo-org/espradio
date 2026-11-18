@@ -680,7 +680,11 @@ esp_err_t esp_event_post(esp_event_base_t event_base, int32_t event_id, const vo
         #else
         intenable = 0; interrupt_reg = 0;
         #endif
+#if CONFIG_IDF_TARGET_ESP32C6
+        volatile uint32_t *int_map = (volatile uint32_t *)0x60010000;
+#else
         volatile uint32_t *int_map = (volatile uint32_t *)0x600C2000;
+#endif
         printf("osi: scan_done isr=%lu INTEN=0x%08lx INT=0x%08lx MAC_MAP=%lu BB_MAP=%lu PWR_MAP=%lu\n",
                (unsigned long)espradio_get_wifi_isr_count(),
                (unsigned long)intenable, (unsigned long)interrupt_reg,
@@ -1472,10 +1476,20 @@ static int espradio_coex_event_duration_get(uint32_t event, uint32_t *duration) 
     return 0;
 }
 
+#if CONFIG_IDF_TARGET_ESP32C6
+extern int coex_pti_get(uint32_t event, uint8_t *pti);
+#endif
+
 static int espradio_coex_pti_get(uint32_t event, uint8_t *pti) {
+#if CONFIG_IDF_TARGET_ESP32C6
+    /* As in esp-hal with the coex feature. The C6 MAC stops promiscuous
+     * receive when every priority is 0. */
+    return coex_pti_get(event, pti);
+#else
     (void)event;
     if (pti) *pti = 0;
     return 0;
+#endif
 }
 
 static void espradio_coex_schm_status_bit_clear(uint32_t type, uint32_t status) {
@@ -1503,6 +1517,17 @@ static int espradio_coex_schm_register_cb(int type, int (*cb)(int)) {
 static int espradio_coex_register_start_cb(int (*cb)(void)) {
     (void)cb; return 0;
 }
+
+#if CONFIG_IDF_TARGET_ESP32C6
+/* Sleep retention is not used. */
+static void espradio_regdma_link_set_write_wait_content(void *link, uint32_t value, uint32_t mask) {
+    (void)link; (void)value; (void)mask;
+}
+
+static void *espradio_sleep_retention_find_link_by_id(int id) {
+    (void)id; return NULL;
+}
+#endif
 
 static int espradio_coex_schm_flexible_period_set(uint8_t period) {
     (void)period; return 0;
@@ -1861,6 +1886,10 @@ wifi_osi_funcs_t espradio_osi_funcs = {
     ._coex_schm_process_restart = espradio_coex_schm_process_restart,
     ._coex_schm_register_cb = espradio_coex_schm_register_cb,
     ._coex_register_start_cb = espradio_coex_register_start_cb,
+#if CONFIG_IDF_TARGET_ESP32C6
+    ._regdma_link_set_write_wait_content = espradio_regdma_link_set_write_wait_content,
+    ._sleep_retention_find_link_by_id = espradio_sleep_retention_find_link_by_id,
+#endif
     ._coex_schm_flexible_period_set = espradio_coex_schm_flexible_period_set,
     ._coex_schm_flexible_period_get = espradio_coex_schm_flexible_period_get,
     ._coex_schm_get_phase_by_idx = espradio_coex_schm_get_phase_by_idx,
