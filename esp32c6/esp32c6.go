@@ -35,11 +35,31 @@ const halWiFiClkMask = esp.MODEM_SYSCON_CLK_CONF1_CLK_WIFI_APB_EN |
 const halLPClkMask = esp.MODEM_LPCON_CLK_CONF_CLK_WIFIPWR_EN |
 	esp.MODEM_LPCON_CLK_CONF_CLK_COEX_EN
 
+const halBTClkMask = esp.MODEM_SYSCON_CLK_CONF1_CLK_FE_APB_EN |
+	esp.MODEM_SYSCON_CLK_CONF1_CLK_FE_CAL_160M_EN |
+	esp.MODEM_SYSCON_CLK_CONF1_CLK_FE_160M_EN |
+	esp.MODEM_SYSCON_CLK_CONF1_CLK_FE_80M_EN |
+	esp.MODEM_SYSCON_CLK_CONF1_CLK_BT_APB_EN |
+	esp.MODEM_SYSCON_CLK_CONF1_CLK_BT_EN
+
+const halBTSecClkMask = esp.MODEM_SYSCON_CLK_CONF_CLK_ETM_EN |
+	esp.MODEM_SYSCON_CLK_CONF_CLK_MODEM_SEC_EN |
+	esp.MODEM_SYSCON_CLK_CONF_CLK_MODEM_SEC_ECB_EN |
+	esp.MODEM_SYSCON_CLK_CONF_CLK_MODEM_SEC_CCM_EN |
+	esp.MODEM_SYSCON_CLK_CONF_CLK_MODEM_SEC_BAH_EN |
+	esp.MODEM_SYSCON_CLK_CONF_CLK_MODEM_SEC_APB_EN |
+	esp.MODEM_SYSCON_CLK_CONF_CLK_BLE_TIMER_EN
+
 var halWiFiClockRefcnt atomic.Uint32
+
+var modemClocksDone atomic.Bool
 
 // initModemClocks follows init_clocks() in esp-hal
 // esp-radio/src/radio_clocks/clocks_ll/esp32c6.rs.
 func initModemClocks() {
+	if modemClocksDone.Swap(true) {
+		return
+	}
 	esp.PMU.SetHP_SLEEP_ICG_MODEM_HP_SLEEP_DIG_ICG_MODEM_CODE(0)
 	esp.PMU.SetHP_MODEM_ICG_MODEM_HP_MODEM_DIG_ICG_MODEM_CODE(1)
 	esp.PMU.SetHP_ACTIVE_ICG_MODEM_HP_ACTIVE_DIG_ICG_MODEM_CODE(2)
@@ -107,6 +127,25 @@ func espradio_hal_wifi_rtc_disable_iso_go() {}
 func espradio_hal_reset_wifi_mac_go() {
 	esp.MODEM_SYSCON.MODEM_RST_CONF.SetBits(esp.MODEM_SYSCON_MODEM_RST_CONF_RST_WIFIMAC)
 	esp.MODEM_SYSCON.MODEM_RST_CONF.ClearBits(esp.MODEM_SYSCON_MODEM_RST_CONF_RST_WIFIMAC)
+}
+
+// espradio_hal_enable_bt_clocks_go follows enable_bt() in esp-hal
+// esp-radio/src/radio_clocks/clocks_ll/esp32c6.rs.
+//
+//export espradio_hal_enable_bt_clocks_go
+func espradio_hal_enable_bt_clocks_go() {
+	initModemClocks()
+	esp.MODEM_SYSCON.CLK_CONF.SetBits(halBTSecClkMask)
+	esp.MODEM_SYSCON.CLK_CONF1.SetBits(halBTClkMask)
+	esp.MODEM_LPCON.CLK_CONF.SetBits(esp.MODEM_LPCON_CLK_CONF_CLK_COEX_EN)
+}
+
+// espradio_hal_chip_minor_version_go reads WAFER_VERSION_MINOR, bits 21:18 of
+// EFUSE_RD_MAC_SPI_SYS_3_REG (ESP-IDF soc/esp32c6/include/soc/efuse_reg.h).
+//
+//export espradio_hal_chip_minor_version_go
+func espradio_hal_chip_minor_version_go() C.uint {
+	return C.uint((esp.EFUSE.RD_MAC_SPI_SYS_3.Get() >> 18) & 0xf)
 }
 
 // espradio_hal_enable_phy_clocks_go follows enable_phy() in esp-hal

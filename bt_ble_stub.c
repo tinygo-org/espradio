@@ -1,6 +1,6 @@
-//go:build !esp32 && !esp32c3 && !esp32s3
+//go:build !esp32 && !esp32c3 && !esp32s3 && !esp32c6
 
-/* BLE is available on the ESP32, the ESP32-C3 and the ESP32-S3 only.
+/* BLE is available on the ESP32, the ESP32-C3, the ESP32-S3 and the ESP32-C6 only.
  * This file supplies the stubs for the other targets.
  *
  * schedOnce() in radio.go is shared by every supported target and calls

@@ -150,13 +150,15 @@ void ets_install_lock(void (*lock)(void), void (*unlock)(void));
 void ets_intr_lock(void);
 void ets_intr_unlock(void);
 
-/* ===== BLE (bt_ble.c) ===== */
+/* ===== BLE (bt_ble.c, bt_ble_esp32c6.c) ===== */
 int  espradio_ble_init(void);
 int  espradio_vhci_write(const uint8_t *data, int len);
 void espradio_bt_isr_dispatch_5(void); /* esp32c3: runs the blob ISR inline */
 void espradio_bt_isr_dispatch_8(void);
 void espradio_bt_isr_latch_5(void);    /* esp32s3: masks and defers instead */
 void espradio_bt_isr_latch_8(void);
+void espradio_bt_isr_dispatch_mac(void);   /* esp32c6 */
+void espradio_bt_isr_dispatch_timer(void); /* esp32c6 */
 void espradio_bt_enable_hw_interrupts(void);
 void espradio_call_bt_isr(void);
 void espradio_bt_sched_tick(void);
