@@ -34,12 +34,13 @@ static void blob_cb_noop(void) { }
 
 /* DMA-corruption workaround tables: relocate heap-allocated function-pointer
  * tables to static .bss where DMA cannot reach.  Only needed on ESP32-C3/S3;
- * on the original ESP32 the blob manages these tables itself and the entry
- * counts differ, so these are compiled out to save ~1.9 KB BSS. */
+ * on the original ESP32 and the ESP32-C6 the blob manages these tables itself
+ * and the entry counts differ, so these are compiled out there. */
+#define ESPRADIO_RELOCATE_BLOB_TABLES (!CONFIG_IDF_TARGET_ESP32 && !CONFIG_IDF_TARGET_ESP32C6)
 #define PP_WDEV_FUNCS_ENTRIES  196
 #define NET80211_FUNCS_MAX_ENTRIES  128
 #define PHY_FUNCS_TABLE_WORDS  166
-#if !CONFIG_IDF_TARGET_ESP32
+#if ESPRADIO_RELOCATE_BLOB_TABLES
 static uint32_t s_pp_wdev_save[PP_WDEV_FUNCS_ENTRIES];
 static uint32_t s_net80211_funcs_save[NET80211_FUNCS_MAX_ENTRIES];
 static uint32_t s_phyFuns_save[PHY_FUNCS_TABLE_WORDS];
@@ -141,7 +142,7 @@ void espradio_post_start_cb(void) {
         g_osi_funcs_p = s_heap_osi_funcs;
     }
 
-#if !CONFIG_IDF_TARGET_ESP32
+#if ESPRADIO_RELOCATE_BLOB_TABLES
     /* The following table relocations are DMA-corruption workarounds calibrated
      * for the ESP32-S3/C3 blobs (fixed entry counts and the g_phyFuns table
      * size/location).  On the original ESP32 the blob's table layouts differ,
@@ -180,7 +181,7 @@ void espradio_post_start_cb(void) {
             s_phyFuns_save[i] = rom_table[i];
         g_phyFuns = s_phyFuns_save;
     }
-#endif /* !CONFIG_IDF_TARGET_ESP32 */
+#endif /* ESPRADIO_RELOCATE_BLOB_TABLES */
 }
 
 /* ROM pointer snapshot / restore.
@@ -278,7 +279,7 @@ void espradio_restore_rom_ptrs(void) {
         g_osi_funcs_p = (wifi_osi_funcs_t *)(uintptr_t)s_saved_g_osi_funcs_p;
     /* esp_phy_enable resets g_phyFuns to the fixed DRAM address on every call.
      * Redirect it back to our static copy (C3/S3 only). */
-#if !CONFIG_IDF_TARGET_ESP32
+#if ESPRADIO_RELOCATE_BLOB_TABLES
     if (g_phyFuns != s_phyFuns_save && s_phyFuns_save[0] != 0)
         g_phyFuns = s_phyFuns_save;
 #endif
