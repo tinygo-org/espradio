@@ -1,4 +1,4 @@
-//go:build !esp32s3 && !esp32
+//go:build !esp32s3 && !esp32 && !esp32c6
 
 package main
 
