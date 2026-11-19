@@ -194,7 +194,7 @@ tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=yourssid -X main.passwo
 
 ### https-get
 
-Sends a GET request to `https://tinygo.org/` with `crypto/tls.Dial` and prints the status line. `netlink.UseTLS` gives the link a [tls13](https://github.com/hybridgroup/tls13) client that checks the server against the embedded ISRG Root X2 and GTS Root R4 certificates. Set `-X main.host=...` for another host. The clock is set with NTP first because certificate dates are checked.
+Sends a GET request to `https://tinygo.org/` with `crypto/tls.Dial` and prints the status line. `netlink.UseTLS` gives the link a [tlsauto](https://github.com/soypat/lneto/tree/main/crypto/tlsauto) client that checks the server against the embedded ISRG Root X2 and GTS Root R4 certificates. Set `-X main.host=...` for another host. The clock is set with NTP first because certificate dates are checked.
 
 `http.Get` over TLS also works but needs a 12 KB or larger goroutine stack, and the ESP32-C3 runs out of heap with that and WiFi running.
 ```

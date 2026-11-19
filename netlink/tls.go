@@ -4,13 +4,13 @@ import (
 	"io"
 	"time"
 
-	"github.com/hybridgroup/tls13"
+	"github.com/soypat/lneto/crypto/tlsauto"
 )
 
-// tlsConn is the part of tls13.Conn used here. Going through an interface
-// keeps tls13 out of the binary unless UseTLS is called.
+// tlsConn is the part of tlsauto.Conn used here. Going through an interface
+// keeps tlsauto out of the binary unless UseTLS is called.
 type tlsConn interface {
-	Configure(tls13.Config) error
+	Configure(tlsauto.Config) error
 	Open(io.ReadWriter) error
 	Handshake() error
 	io.ReadWriteCloser
@@ -19,7 +19,7 @@ type tlsConn interface {
 // tlsSocket runs one TLS client over a TCP socket of the Berkeley stack.
 type tlsSocket struct {
 	n        *Esplink
-	cfg      *tls13.Config
+	cfg      *tlsauto.Config
 	conn     tlsConn
 	fd       int
 	open     bool
@@ -34,13 +34,13 @@ func (s *tlsSocket) Write(b []byte) (int, error) {
 	return s.n.berkeley.Send(s.fd, b, 0, s.deadline)
 }
 
-// UseTLS makes crypto/tls.Dial and https requests on n use tls13 with cfg, which fail without it.
+// UseTLS makes crypto/tls.Dial and https requests on n use tlsauto with cfg, which fail without it.
 // ServerName is set to the dialed host. One TLS connection can be open at a time.
-func UseTLS(n *Esplink, cfg *tls13.Config) {
+func UseTLS(n *Esplink, cfg *tlsauto.Config) {
 	n.tls.n = n
 	n.tls.cfg = cfg
 	if n.tls.conn == nil {
-		n.tls.conn = new(tls13.Conn)
+		n.tls.conn = new(tlsauto.Conn)
 	}
 }
 

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hybridgroup/tls13"
+	"github.com/soypat/lneto/crypto/tlsauto"
 	"github.com/soypat/lneto/x/xnet"
 	nl "tinygo.org/x/drivers/netlink"
 	"tinygo.org/x/espradio"
@@ -162,7 +162,7 @@ func TestTLSSocketWithoutConfig(t *testing.T) {
 
 func TestTLSSocketBusy(t *testing.T) {
 	var e Esplink
-	UseTLS(&e, &tls13.Config{})
+	UseTLS(&e, &tlsauto.Config{})
 	e.berkeley = *xnet.NewBerkeleyStack(e.ns.StackGo().Socket)
 	fd, err := e.Socket(xnet.AF_INET, xnet.SOCK_STREAM, ipprotoTLS)
 	if err != nil {
@@ -188,16 +188,16 @@ type fakeTLSConn struct {
 	deadline time.Time
 }
 
-func (f *fakeTLSConn) Configure(tls13.Config) error { return nil }
-func (f *fakeTLSConn) Open(io.ReadWriter) error     { return nil }
-func (f *fakeTLSConn) Handshake() error             { f.deadline = f.s.deadline; return nil }
-func (f *fakeTLSConn) Read(b []byte) (int, error)   { return 0, nil }
-func (f *fakeTLSConn) Write(b []byte) (int, error)  { return len(b), nil }
-func (f *fakeTLSConn) Close() error                 { return nil }
+func (f *fakeTLSConn) Configure(tlsauto.Config) error { return nil }
+func (f *fakeTLSConn) Open(io.ReadWriter) error       { return nil }
+func (f *fakeTLSConn) Handshake() error               { f.deadline = f.s.deadline; return nil }
+func (f *fakeTLSConn) Read(b []byte) (int, error)     { return 0, nil }
+func (f *fakeTLSConn) Write(b []byte) (int, error)    { return len(b), nil }
+func (f *fakeTLSConn) Close() error                   { return nil }
 
 func TestTLSHandshakeTimeout(t *testing.T) {
 	var e Esplink
-	UseTLS(&e, &tls13.Config{})
+	UseTLS(&e, &tlsauto.Config{})
 	fake := &fakeTLSConn{s: &e.tls}
 	e.tls.conn = fake
 	if err := e.tlsHandshake("example.com"); err != nil {

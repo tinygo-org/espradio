@@ -1,4 +1,4 @@
-// This example sends an HTTP request over crypto/tls.Dial using the tls13 client in Esplink.
+// This example sends an HTTP request over crypto/tls.Dial using the tlsauto client in Esplink.
 //
 // tinygo flash -target xiao-esp32c3 -ldflags="-X main.ssid=YourSSID -X main.password=YourPassword" -monitor ./examples/https-get
 package main
@@ -9,12 +9,17 @@ import (
 	"crypto/tls"
 	_ "embed"
 	"errors"
+	"hash"
 	"io"
 	"runtime"
 	"time"
 
-	"github.com/hybridgroup/tls13"
+	"github.com/soypat/lcrypto"
+	"github.com/soypat/lcrypto/aesgcm"
+	"github.com/soypat/lcrypto/sha256"
+	"github.com/soypat/lcrypto/x25519"
 	"github.com/soypat/lcrypto/x509"
+	"github.com/soypat/lneto/crypto/tlsauto"
 	"tinygo.org/x/drivers/netdev"
 	nl "tinygo.org/x/drivers/netlink"
 	"tinygo.org/x/espradio/netlink"
@@ -60,12 +65,23 @@ func main() {
 		TCP:                 netlink.TCPConfig{PoolSize: 1},
 		TLSHandshakeTimeout: 30 * time.Second,
 	}
-	netlink.UseTLS(&link, &tls13.Config{
-		Rand:         rand.Reader,
-		Verifier:     &verifier,
-		Schemes:      verifier.Schemes(schemes[:0]),
-		Suites:       []tls13.Suite{tls13.AES128GCMSHA256()},
-		KeyExchanges: []tls13.KeyExchange{tls13.X25519()},
+	netlink.UseTLS(&link, &tlsauto.Config{
+		Rand:     rand.Reader,
+		Verifier: peerVerifier{&verifier},
+		Schemes:  verifier.Schemes(schemes[:0]),
+		Suites: []tlsauto.Suite{{
+			ID:      0x1301,
+			KeyLen:  16,
+			NewAEAD: func() tlsauto.AEADCipher { return new(aesgcm.Cipher) },
+			NewHash: func() hash.Hash { return sha256.New() },
+		}},
+		KeyExchanges: []tlsauto.KeyExchange{{
+			ID:             x25519.GroupID,
+			ClientShareLen: x25519.ShareSize,
+			ServerShareLen: x25519.ShareSize,
+			SharedLen:      x25519.SharedSize,
+			NewExchanger:   func() tlsauto.Exchanger { return new(x25519.Exchanger) },
+		}},
 	})
 	netdev.UseNetdev(&link)
 
@@ -125,4 +141,11 @@ func failure(msg string) {
 		println("stopped after failure:", msg)
 		time.Sleep(time.Second)
 	}
+}
+
+// peerVerifier passes the tlsauto chain to the lcrypto verifier, which takes its own CertChain type.
+type peerVerifier struct{ *x509.Verifier }
+
+func (v peerVerifier) VerifyPeer(c tlsauto.CertChain, scheme uint16, peerIsServer bool, name, msg, sig []byte) error {
+	return v.Verifier.VerifyPeer(lcrypto.CertChain(c), scheme, peerIsServer, name, msg, sig)
 }
