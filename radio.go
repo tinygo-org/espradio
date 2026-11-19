@@ -502,8 +502,7 @@ func enable(config Config) error {
 	}
 	C.espradio_ensure_osi_ptr()
 
-	wifiISR = interrupt.New(wifiCPUInterrupt, wifiISRHandler)
-	wifiISR.Enable()
+	enableWiFiISR()
 	C.espradio_wifi_int_raise_priority()
 
 	C.espradio_prewire_wifi_interrupts()
@@ -1187,8 +1186,6 @@ func espradio_wifi_int_restore(wifi_int_mux unsafe.Pointer, tmp uint32) {
 	}
 	_ = tmp
 }
-
-var wifiISR interrupt.Interrupt
 
 // ─── OSI sync primitives ───────────────────────────────────────────────────────
 
