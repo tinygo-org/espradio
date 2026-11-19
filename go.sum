@@ -1,7 +1,7 @@
 github.com/hybridgroup/lcrypto v0.0.0-20261117132347-27213a137c8e h1:K9u2Wh6czQ2W7Czmxji+H2uOkdSLwg6opWWAoSi7v/s=
 github.com/hybridgroup/lcrypto v0.0.0-20261117132347-27213a137c8e/go.mod h1:6PDwW2aJ6WPo3gr7UQEMCoIHiPj92Zn+9beCJL1jn/k=
-github.com/soypat/lneto v0.4.1-0.20261119181513-9f905527ca0f h1:jXWWMM9x75PYK9UKa0iJ0NIFqQRM+cbXGJ2IZp8oims=
-github.com/soypat/lneto v0.4.1-0.20261119181513-9f905527ca0f/go.mod h1:Be5PjwoYukvHFiUXxpYi8+ppH2F/gw/vjGBvFdv+Ti8=
+github.com/soypat/lneto v0.4.1-0.20261119185226-0494b55c2511 h1:NGjzwPiwZRRARC5auB+Dbfsbzxt9VpXz/G3TTWaPw9Q=
+github.com/soypat/lneto v0.4.1-0.20261119185226-0494b55c2511/go.mod h1:Be5PjwoYukvHFiUXxpYi8+ppH2F/gw/vjGBvFdv+Ti8=
 github.com/soypat/natiu-mqtt v0.7.0 h1:94nWBMt2Pxu+8uEXvOIUXLp6hNWv5912D1qPH6wbGAg=
 github.com/soypat/natiu-mqtt v0.7.0/go.mod h1:xEta+cwop9izVCW7xOx2W+ct9PRMqr0gNVkvBPnQTc4=
 tinygo.org/x/drivers v0.37.0 h1:t2YPSYV+lEXwKYGvszHWmkMLLBp1dhcpfzsrcEwwf9Q=
