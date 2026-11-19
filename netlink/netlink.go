@@ -12,6 +12,7 @@ import (
 	"github.com/soypat/lneto/dns"
 	"github.com/soypat/lneto/x/xnet"
 
+	"tinygo.org/x/drivers/netdev"
 	nl "tinygo.org/x/drivers/netlink"
 	"tinygo.org/x/espradio"
 )
@@ -21,6 +22,8 @@ const defaultHostname = "tinygo-espradio"
 const pollTime = 5 * time.Millisecond
 
 const dhcpTimeout = 10 * time.Second
+
+const ipprotoTLS = netdev.IPPROTO_TLS
 
 var pollBackoff = lneto.BackoffStrategy(func(_ uint) time.Duration {
 	return pollTime
@@ -48,6 +51,11 @@ type Esplink struct {
 
 	// TCP overrides the TCP buffer and pool sizes. Zero fields keep the defaults.
 	TCP TCPConfig
+
+	// TLSHandshakeTimeout bounds the TLS handshake. Zero means no timeout.
+	TLSHandshakeTimeout time.Duration
+
+	tls tlsSocket
 }
 
 // TCPConfig sizes the TCP connections of the stack.
@@ -300,7 +308,14 @@ func (n *Esplink) Socket(domain int, stype int, protocol int) (int, error) {
 		println("Socket:", domain, stype, protocol)
 	}
 
-	return n.berkeley.Socket(domain, stype, protocol)
+	if err := n.tlsSocket(protocol); err != nil {
+		return -1, err
+	}
+	fd, err := n.berkeley.Socket(domain, stype, protocol)
+	if err == nil && protocol == ipprotoTLS {
+		n.tls.fd, n.tls.open = fd, true
+	}
+	return fd, err
 }
 
 // Bind binds a socket to an IP address and port.
@@ -331,7 +346,14 @@ func (n *Esplink) Connect(sockfd int, host string, ip netip.AddrPort) error {
 		}
 	}
 
-	return n.berkeley.Connect(sockfd, host, ip)
+	if err := n.berkeley.Connect(sockfd, host, ip); err != nil {
+		return err
+	}
+	if n.isTLS(sockfd) {
+		_, err := n.tlsResult(0, n.tlsHandshake(host))
+		return err
+	}
+	return nil
 }
 
 // Listen marks a socket as listening for incoming connections.
@@ -358,6 +380,10 @@ func (n *Esplink) Send(sockfd int, buf []byte, flags int, deadline time.Time) (i
 		println("Send: sockfd", sockfd, "len", len(buf), "flags", flags, "deadline", deadline.String())
 	}
 
+	if n.isTLS(sockfd) {
+		n.tls.deadline = deadline
+		return n.tlsResult(n.tls.conn.Write(buf))
+	}
 	return n.berkeley.Send(sockfd, buf, flags, deadline)
 }
 
@@ -367,6 +393,10 @@ func (n *Esplink) Recv(sockfd int, buf []byte, flags int, deadline time.Time) (i
 		println("Recv: sockfd", sockfd, "len", len(buf), "flags", flags, "deadline", deadline.String())
 	}
 
+	if n.isTLS(sockfd) {
+		n.tls.deadline = deadline
+		return n.tlsResult(n.tls.conn.Read(buf))
+	}
 	return n.berkeley.Recv(sockfd, buf, flags, deadline)
 }
 
@@ -376,6 +406,10 @@ func (n *Esplink) Close(sockfd int) error {
 		println("Close: sockfd", sockfd)
 	}
 
+	if n.isTLS(sockfd) {
+		n.tls.conn.Close()
+		n.tls.open = false
+	}
 	return n.berkeley.Close(sockfd)
 }
 
