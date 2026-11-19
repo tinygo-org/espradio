@@ -34,6 +34,9 @@ func initHardware() error { return nil }
 // wifiISRHandler is a no-op for QEMU: no real WiFi interrupts.
 func wifiISRHandler(interrupt.Interrupt) {}
 
+// enableWiFiISR is a no-op for QEMU: no PLIC or interrupt matrix to program.
+func enableWiFiISR() {}
+
 // QEMU has no BT controller.
 func bleInit() error { return errors.New("espradio: BLE not supported on QEMU") }
 
