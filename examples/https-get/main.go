@@ -9,19 +9,17 @@ import (
 	"crypto/tls"
 	_ "embed"
 	"errors"
-	"hash"
 	"io"
 	"runtime"
 	"time"
 
 	"github.com/soypat/lcrypto"
-	"github.com/soypat/lcrypto/aesgcm"
-	"github.com/soypat/lcrypto/sha256"
 	"github.com/soypat/lcrypto/x25519"
 	"github.com/soypat/lcrypto/x509"
 	"github.com/soypat/lneto/crypto/tlsauto"
 	"tinygo.org/x/drivers/netdev"
 	nl "tinygo.org/x/drivers/netlink"
+	"tinygo.org/x/espradio/hwcrypto"
 	"tinygo.org/x/espradio/netlink"
 )
 
@@ -69,12 +67,7 @@ func main() {
 		Rand:     rand.Reader,
 		Verifier: peerVerifier{&verifier},
 		Schemes:  verifier.Schemes(schemes[:0]),
-		Suites: []tlsauto.Suite{{
-			ID:      0x1301,
-			KeyLen:  16,
-			NewAEAD: func() tlsauto.AEADCipher { return new(aesgcm.Cipher) },
-			NewHash: func() hash.Hash { return sha256.New() },
-		}},
+		Suites:   []tlsauto.Suite{hwcrypto.TLSAES128GCMSHA256()},
 		KeyExchanges: []tlsauto.KeyExchange{{
 			ID:             x25519.GroupID,
 			ClientShareLen: x25519.ShareSize,
