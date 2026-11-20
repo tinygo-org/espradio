@@ -1,4 +1,4 @@
-//go:build (esp32c3 || esp32s3) && scheduler.cores
+//go:build (esp32 || esp32c3 || esp32s3 || esp32c6) && scheduler.cores
 
 package hwcrypto
 

@@ -1,9 +1,10 @@
-//go:build esp32c3 || esp32s3
+//go:build esp32c3 || esp32s3 || esp32c6
 
 package hwcrypto
 
 import (
 	"device/esp"
+	"hash"
 	"runtime/volatile"
 	"unsafe"
 )
@@ -130,3 +131,5 @@ type SHA256 struct{ digest }
 func NewSHA256() *SHA256 {
 	return &SHA256{digest{mode: shaMode256, size: 32, blockSize: 64, stateLen: 8}}
 }
+
+func newSHA256() hash.Hash { return NewSHA256() }
