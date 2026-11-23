@@ -28,15 +28,22 @@ patch-esp32s3:
 patch-esp32:
 	go run ./tools/patch_xtensa_literals.go blobs/libs/esp32/*.a
 
+SMOKE_TARGETS ?= xiao-esp32c3 xiao-esp32s3 esp32-mini32 xiao-esp32c6
+SMOKE_JOBS ?= 1
+
 smoke-test:
 	mkdir -p build
 	rm -rf build/*
-	@for example in ./examples/*/; do \
-		for target in xiao-esp32c3 xiao-esp32s3 esp32-mini32 xiao-esp32c6; do \
-			echo "CGO_CFLAGS_ALLOW='$(CGO_CFLAGS_ALLOW_PATTERN)' tinygo build -target=$$target -size short -o build/$$(basename $$example) $$example"; \
-			CGO_CFLAGS_ALLOW='$(CGO_CFLAGS_ALLOW_PATTERN)' tinygo build -target=$$target -size short -o build/$$(basename $$example) $$example || exit 1; \
+	@for target in $(SMOKE_TARGETS); do \
+		mkdir -p build/$$target; \
+		for example in ./examples/*/; do \
+			echo $$target $$example; \
 		done; \
-	done
+	done | xargs -n 2 -P $(SMOKE_JOBS) sh -c '\
+		cmd="tinygo build -target=$$0 -size short -o build/$$0/$$(basename $$1) $$1"; \
+		out=$$(CGO_CFLAGS_ALLOW="$(CGO_CFLAGS_ALLOW_PATTERN)" $$cmd 2>&1); status=$$?; \
+		printf "%s\n%s\n" "$$cmd" "$$out"; \
+		exit $$status'
 
 update-esp-wifi:
 	git submodule update --init esp-wifi
