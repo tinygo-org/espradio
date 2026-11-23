@@ -19,7 +19,7 @@ jobs:
       options: --user root
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Install QEMU
         run: apt-get update && apt-get install -y qemu-system-misc
       - name: TinyGo version check
@@ -42,7 +42,7 @@ jobs:
         target: [xiao-esp32c3, xiao-esp32s3, esp32-mini32, xiao-esp32c6]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: TinyGo version check
         run: tinygo version
       - name: Smoke test examples
