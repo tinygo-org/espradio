@@ -186,10 +186,11 @@ func TestTLSSocketBusy(t *testing.T) {
 type fakeTLSConn struct {
 	s        *tlsSocket
 	deadline time.Time
+	rw       io.ReadWriter
 }
 
 func (f *fakeTLSConn) Configure(tlsauto.Config) error { return nil }
-func (f *fakeTLSConn) Open(io.ReadWriter) error       { return nil }
+func (f *fakeTLSConn) Open(rw io.ReadWriter) error    { f.rw = rw; return nil }
 func (f *fakeTLSConn) Handshake() error               { f.deadline = f.s.deadline; return nil }
 func (f *fakeTLSConn) Read(b []byte) (int, error)     { return 0, nil }
 func (f *fakeTLSConn) Write(b []byte) (int, error)    { return len(b), nil }
@@ -213,5 +214,43 @@ func TestTLSHandshakeTimeout(t *testing.T) {
 	}
 	if d := fake.deadline.Sub(before); d < 5*time.Second || d > 6*time.Second {
 		t.Errorf("deadline = now + %v; want about 5s", d)
+	}
+}
+
+func TestTLSHandshakeWithoutBufferedReader(t *testing.T) {
+	var e Esplink
+	UseTLS(&e, &tlsauto.Config{})
+	fake := &fakeTLSConn{s: &e.tls}
+	e.tls.conn = fake
+	if err := e.tlsHandshake("example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if fake.rw != io.ReadWriter(&e.tls) {
+		t.Errorf("Open got %T; want *tlsSocket", fake.rw)
+	}
+}
+
+type fakeBufferedConn struct {
+	deadline time.Time
+	waited   int
+}
+
+func (f *fakeBufferedConn) BufferedData() (data0, data1 []byte) { return []byte("ab"), []byte("c") }
+func (f *fakeBufferedConn) LinearizeInput()                     {}
+func (f *fakeBufferedConn) DiscardInput(n int) error            { return nil }
+func (f *fakeBufferedConn) WaitInput(n int) error               { f.waited = n; return nil }
+func (f *fakeBufferedConn) SetReadDeadline(t time.Time) error   { f.deadline = t; return nil }
+
+func TestTLSInPlaceDeadline(t *testing.T) {
+	fake := &fakeBufferedConn{}
+	s := &tlsInPlace{rb: fake, deadline: time.Now().Add(time.Second)}
+	if err := s.WaitInput(5); err != nil || fake.waited != 5 {
+		t.Fatalf("WaitInput = %v, waited %d", err, fake.waited)
+	}
+	if !fake.deadline.Equal(s.deadline) {
+		t.Errorf("read deadline = %v; want %v", fake.deadline, s.deadline)
+	}
+	if d0, d1 := s.BufferedData(); string(d0)+string(d1) != "abc" {
+		t.Errorf("BufferedData = %q %q", d0, d1)
 	}
 }

@@ -62,7 +62,8 @@ func main() {
 	}
 
 	link := netlink.Esplink{
-		TCP:                 netlink.TCPConfig{PoolSize: 1},
+		// A receive buffer that holds a whole TLS record lets tlsauto decrypt it in place, RFC 8446 5.1.
+		TCP:                 netlink.TCPConfig{PoolSize: 1, RxBufSize: 18 << 10},
 		TLSHandshakeTimeout: 30 * time.Second,
 	}
 	netlink.UseTLS(&link, &tlsauto.Config{

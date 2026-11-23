@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/soypat/lneto/crypto/tlsauto"
+	"github.com/soypat/lneto/x/xnet"
 )
 
 // tlsConn is the part of tlsauto.Conn used here. Going through an interface
@@ -24,6 +25,7 @@ type tlsSocket struct {
 	fd       int
 	open     bool
 	deadline time.Time
+	rb       xnet.BufferedConn
 }
 
 func (s *tlsSocket) Read(b []byte) (int, error) {
@@ -32,6 +34,21 @@ func (s *tlsSocket) Read(b []byte) (int, error) {
 
 func (s *tlsSocket) Write(b []byte) (int, error) {
 	return s.n.berkeley.Send(s.fd, b, 0, s.deadline)
+}
+
+// tlsInPlace is a tlsSocket whose TCP receive buffer tlsauto reads records from in place.
+type tlsInPlace tlsSocket
+
+func (s *tlsInPlace) Read(b []byte) (int, error)  { return (*tlsSocket)(s).Read(b) }
+func (s *tlsInPlace) Write(b []byte) (int, error) { return (*tlsSocket)(s).Write(b) }
+
+func (s *tlsInPlace) BufferedData() (data0, data1 []byte) { return s.rb.BufferedData() }
+func (s *tlsInPlace) LinearizeInput()                     { s.rb.LinearizeInput() }
+func (s *tlsInPlace) DiscardInput(n int) error            { return s.rb.DiscardInput(n) }
+
+func (s *tlsInPlace) WaitInput(n int) error {
+	s.rb.SetReadDeadline(s.deadline)
+	return s.rb.WaitInput(n)
 }
 
 // UseTLS makes crypto/tls.Dial and https requests on n use tlsauto with cfg, which fail without it.
@@ -71,7 +88,12 @@ func (n *Esplink) tlsHandshake(host string) error {
 	if err := n.tls.conn.Configure(cfg); err != nil {
 		return err
 	}
-	if err := n.tls.conn.Open(&n.tls); err != nil {
+	var rw io.ReadWriter = &n.tls
+	var ok bool
+	if n.tls.rb, ok = n.berkeley.BufferedReader(n.tls.fd); ok {
+		rw = (*tlsInPlace)(&n.tls)
+	}
+	if err := n.tls.conn.Open(rw); err != nil {
 		return err
 	}
 	start := time.Now()
