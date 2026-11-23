@@ -7,8 +7,12 @@ on:
       - main
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build:
+  unit-test:
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/tinygo-org/tinygo-dev
@@ -26,7 +30,22 @@ jobs:
         run: |
             go env -w GOFLAGS=-buildvcs=false
             make unit-test
+
+  smoke-test:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/tinygo-org/tinygo-dev
+      options: --user root
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [xiao-esp32c3, xiao-esp32s3, esp32-mini32, xiao-esp32c6]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: TinyGo version check
+        run: tinygo version
       - name: Smoke test examples
         run: |
             go env -w GOFLAGS=-buildvcs=false
-            make smoke-test
+            make smoke-test SMOKE_TARGETS=${{ matrix.target }} SMOKE_JOBS=$(nproc)
