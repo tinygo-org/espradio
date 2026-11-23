@@ -10,6 +10,7 @@ import (
 	"github.com/soypat/lneto"
 	"github.com/soypat/lneto/dhcp/dhcpv4"
 	"github.com/soypat/lneto/dns"
+	"github.com/soypat/lneto/tcp"
 	"github.com/soypat/lneto/x/xnet"
 
 	nl "tinygo.org/x/drivers/netlink"
@@ -36,6 +37,10 @@ type Esplink struct {
 	berkeley xnet.StackBerkeley
 	started  bool
 	link     espradio.Link
+
+	closingTimeout time.Duration
+	lastDial       *tcp.Conn
+	dialed         map[int]*tcp.Conn
 
 	// ArenaPoolSize overrides the default arena pool size (bytes). Zero uses target default.
 	ArenaPoolSize int
@@ -158,7 +163,8 @@ func (n *Esplink) startStack(nd *espradio.NetDev, cfg xnet.StackConfig, pool xne
 	if err != nil {
 		return err
 	}
-	n.berkeley = *xnet.NewBerkeleyStack(n.ns.StackGo().Socket)
+	n.closingTimeout = pool.ClosingTimeout
+	n.berkeley = *xnet.NewBerkeleyStack(n.socket)
 	n.started = true
 	go func() {
 		err := espradio.RunStack(context.Background(), nd, &n.ns)
@@ -331,7 +337,25 @@ func (n *Esplink) Connect(sockfd int, host string, ip netip.AddrPort) error {
 		}
 	}
 
-	return n.berkeley.Connect(sockfd, host, ip)
+	n.lastDial = nil
+	err := n.berkeley.Connect(sockfd, host, ip)
+	if err == nil && n.lastDial != nil {
+		if n.dialed == nil {
+			n.dialed = make(map[int]*tcp.Conn)
+		}
+		n.dialed[sockfd] = n.lastDial
+	}
+	n.lastDial = nil
+	return err
+}
+
+// socket wraps the StackGo socket call to keep the tcp.Conn of a dial.
+func (n *Esplink) socket(ctx context.Context, network string, family, sotype int, laddr, raddr net.Addr) (any, error) {
+	c, err := n.ns.StackGo().Socket(ctx, network, family, sotype, laddr, raddr)
+	if lc, ok := c.(interface{ LnetoConn() *tcp.Conn }); ok {
+		n.lastDial = lc.LnetoConn()
+	}
+	return c, err
 }
 
 // Listen marks a socket as listening for incoming connections.
@@ -376,7 +400,26 @@ func (n *Esplink) Close(sockfd int) error {
 		println("Close: sockfd", sockfd)
 	}
 
-	return n.berkeley.Close(sockfd)
+	conn := n.dialed[sockfd]
+	delete(n.dialed, sockfd)
+	err := n.berkeley.Close(sockfd)
+	if conn != nil {
+		awaitClosed(conn, n.closingTimeout)
+	}
+	return err
+}
+
+// awaitClosed waits for the close handshake of conn and aborts it after timeout.
+// A dialed lneto conn has no close timeout and holds its port until it closes.
+func awaitClosed(conn *tcp.Conn, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for !conn.State().IsClosed() {
+		if time.Now().After(deadline) {
+			conn.Abort()
+			return
+		}
+		time.Sleep(pollTime)
+	}
 }
 
 // SetSockOpt sets a socket option.
