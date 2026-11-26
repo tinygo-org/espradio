@@ -1,9 +1,12 @@
 package netlink
 
 import (
+	"io"
 	"net/netip"
 	"testing"
+	"time"
 
+	"github.com/soypat/lneto/crypto/tlsauto"
 	"github.com/soypat/lneto/x/xnet"
 	nl "tinygo.org/x/drivers/netlink"
 	"tinygo.org/x/espradio"
@@ -146,5 +149,111 @@ func TestTCPConfigApply(t *testing.T) {
 	got := TCPConfig{PoolSize: 1, TxBufSize: 2048}.apply(def)
 	if got.PoolSize != 1 || got.QueueSize != 4 || got.TxBufSize != 2048 || got.RxBufSize != 1024 {
 		t.Errorf("partial TCPConfig: %+v", got)
+	}
+}
+
+func TestTLSSocketWithoutConfig(t *testing.T) {
+	var e Esplink
+	_, err := e.Socket(xnet.AF_INET, xnet.SOCK_STREAM, ipprotoTLS)
+	if err != errNoTLSConfig {
+		t.Errorf("Socket(IPPROTO_TLS) without TLS config = %v; want errNoTLSConfig", err)
+	}
+}
+
+func TestTLSSocketBusy(t *testing.T) {
+	var e Esplink
+	UseTLS(&e, &tlsauto.Config{})
+	e.berkeley = *xnet.NewBerkeleyStack(e.ns.StackGo().Socket)
+	fd, err := e.Socket(xnet.AF_INET, xnet.SOCK_STREAM, ipprotoTLS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !e.isTLS(fd) {
+		t.Errorf("isTLS(%d) = false; want true", fd)
+	}
+	if _, err = e.Socket(xnet.AF_INET, xnet.SOCK_STREAM, ipprotoTLS); err != errTLSBusy {
+		t.Errorf("second Socket(IPPROTO_TLS) = %v; want errTLSBusy", err)
+	}
+	e.Close(fd)
+	if e.isTLS(fd) {
+		t.Errorf("isTLS(%d) after Close = true; want false", fd)
+	}
+	if _, err = e.Socket(xnet.AF_INET, xnet.SOCK_STREAM, ipprotoTLS); err != nil {
+		t.Errorf("Socket(IPPROTO_TLS) after Close = %v; want nil", err)
+	}
+}
+
+type fakeTLSConn struct {
+	s        *tlsSocket
+	deadline time.Time
+	rw       io.ReadWriter
+}
+
+func (f *fakeTLSConn) Configure(tlsauto.Config) error { return nil }
+func (f *fakeTLSConn) Open(rw io.ReadWriter) error    { f.rw = rw; return nil }
+func (f *fakeTLSConn) Handshake() error               { f.deadline = f.s.deadline; return nil }
+func (f *fakeTLSConn) Read(b []byte) (int, error)     { return 0, nil }
+func (f *fakeTLSConn) Write(b []byte) (int, error)    { return len(b), nil }
+func (f *fakeTLSConn) Close() error                   { return nil }
+
+func TestTLSHandshakeTimeout(t *testing.T) {
+	var e Esplink
+	UseTLS(&e, &tlsauto.Config{})
+	fake := &fakeTLSConn{s: &e.tls}
+	e.tls.conn = fake
+	if err := e.tlsHandshake("example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if !fake.deadline.IsZero() {
+		t.Errorf("deadline without timeout = %v; want zero", fake.deadline)
+	}
+	e.TLSHandshakeTimeout = 5 * time.Second
+	before := time.Now()
+	if err := e.tlsHandshake("example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if d := fake.deadline.Sub(before); d < 5*time.Second || d > 6*time.Second {
+		t.Errorf("deadline = now + %v; want about 5s", d)
+	}
+}
+
+func TestTLSHandshakeWithoutBufferedReader(t *testing.T) {
+	var e Esplink
+	UseTLS(&e, &tlsauto.Config{})
+	fake := &fakeTLSConn{s: &e.tls}
+	e.tls.conn = fake
+	if err := e.tlsHandshake("example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if fake.rw != io.ReadWriter(&e.tls) {
+		t.Errorf("Open got %T; want *tlsSocket", fake.rw)
+	}
+}
+
+type fakeBufferedConn struct {
+	deadline time.Time
+	waited   int
+}
+
+func (f *fakeBufferedConn) BufferedData() (data0, data1 []byte, err error) {
+	return []byte("ab"), []byte("c"), nil
+}
+func (f *fakeBufferedConn) LinearizeInput() bool              { return false }
+func (f *fakeBufferedConn) ReadDiscard(n int) (int, error)    { return n, nil }
+func (f *fakeBufferedConn) SizeInput() int                    { return 3 }
+func (f *fakeBufferedConn) WaitInput(n int) error             { f.waited = n; return nil }
+func (f *fakeBufferedConn) SetReadDeadline(t time.Time) error { f.deadline = t; return nil }
+
+func TestTLSInPlaceDeadline(t *testing.T) {
+	fake := &fakeBufferedConn{}
+	s := &tlsInPlace{rb: fake, deadline: time.Now().Add(time.Second)}
+	if err := s.WaitInput(5); err != nil || fake.waited != 5 {
+		t.Fatalf("WaitInput = %v, waited %d", err, fake.waited)
+	}
+	if !fake.deadline.Equal(s.deadline) {
+		t.Errorf("read deadline = %v; want %v", fake.deadline, s.deadline)
+	}
+	if d0, d1, _ := s.BufferedData(); string(d0)+string(d1) != "abc" {
+		t.Errorf("BufferedData = %q %q", d0, d1)
 	}
 }
