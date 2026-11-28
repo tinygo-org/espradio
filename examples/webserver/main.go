@@ -14,6 +14,7 @@ import (
 	"github.com/soypat/lneto/http/httphi"
 	"github.com/soypat/lneto/http/httpraw"
 	nl "tinygo.org/x/drivers/netlink"
+	"tinygo.org/x/espradio"
 	link "tinygo.org/x/espradio/netlink"
 )
 
@@ -42,7 +43,9 @@ func main() {
 	time.Sleep(2 * time.Second)
 
 	link := &link.Esplink{
-		MaxTxPower: maxTxPower,
+		Config: espradio.Config{
+			MaxTxPower: maxTxPower,
+		},
 	}
 
 	println("Connecting to WiFi", ssid+"...")

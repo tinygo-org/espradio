@@ -6,6 +6,7 @@ import (
 	"github.com/soypat/lneto/http/httphi"
 	"tinygo.org/x/drivers/netdev"
 	nl "tinygo.org/x/drivers/netlink"
+	"tinygo.org/x/espradio"
 	link "tinygo.org/x/espradio/netlink"
 )
 
@@ -24,7 +25,9 @@ func main() {
 	time.Sleep(2 * time.Second)
 
 	link := &link.Esplink{
-		MaxTxPower: maxTxPower,
+		Config: espradio.Config{
+			MaxTxPower: maxTxPower,
+		},
 	}
 	netdev.UseNetdev(link)
 

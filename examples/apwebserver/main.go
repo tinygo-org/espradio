@@ -42,7 +42,9 @@ func main() {
 	time.Sleep(2 * time.Second)
 
 	lnk := &link.Esplink{
-		MaxTxPower: maxTxPower,
+		Config: espradio.Config{
+			MaxTxPower: maxTxPower,
+		},
 	}
 
 	println("Starting AP", ssid+"...")
